@@ -15,7 +15,7 @@ import { commonStyles, colors } from '@/styles/commonStyles';
 import { storageService } from '@/services/storageService';
 import { ExportData, ImportResult, Statistics, Section } from '@/types/inventory';
 import * as DocumentPicker from 'expo-document-picker';
-import { documentDirectory, writeAsStringAsync, readAsStringAsync } from 'expo-file-system';
+import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 
 export default function ExportImportScreen() {
@@ -87,9 +87,9 @@ export default function ExportImportScreen() {
       const jsonString = JSON.stringify(exportData, null, 2);
       
       const fileName = `inventory_backup_${new Date().toISOString().split('T')[0]}.json`;
-      const fileUri = `${documentDirectory}${fileName}`;
+      const fileUri = `${FileSystem.documentDirectory}${fileName}`;
       
-      await writeAsStringAsync(fileUri, jsonString);
+      await FileSystem.writeAsStringAsync(fileUri, jsonString);
       
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(fileUri, {
@@ -127,9 +127,9 @@ export default function ExportImportScreen() {
       
       const jsonString = JSON.stringify(exportData, null, 2);
       const fileName = `inventory_items_${new Date().toISOString().split('T')[0]}.json`;
-      const fileUri = `${documentDirectory}${fileName}`;
+      const fileUri = `${FileSystem.documentDirectory}${fileName}`;
       
-      await writeAsStringAsync(fileUri, jsonString);
+      await FileSystem.writeAsStringAsync(fileUri, jsonString);
       
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(fileUri, {
@@ -160,7 +160,7 @@ export default function ExportImportScreen() {
 
       setLoading(true);
       
-      const fileContent = await readAsStringAsync(result.assets[0].uri);
+      const fileContent = await FileSystem.readAsStringAsync(result.assets[0].uri);
       const importData = JSON.parse(fileContent);
       
       // Validate import data structure

@@ -30,11 +30,11 @@ export function ContextMenu({ visible, onClose, options, onAction, position }: C
 
   const menuStyle = position ? {
     position: 'absolute' as const,
-    top: Math.min(position.y, screenHeight - 200),
-    left: Math.min(position.x, screenWidth - 200),
+    top: Math.min(position.y, screenHeight - 300),
+    left: Math.min(position.x, screenWidth - 250),
   } : {
     alignSelf: 'center' as const,
-    marginTop: screenHeight * 0.3,
+    marginTop: screenHeight * 0.2,
   };
 
   return (
@@ -48,35 +48,37 @@ export function ContextMenu({ visible, onClose, options, onAction, position }: C
         <View style={[styles.menu, menuStyle]}>
           {options.title && (
             <View style={styles.header}>
-              <Text style={styles.title}>{options.title}</Text>
+              <Text style={styles.title} numberOfLines={2}>{options.title}</Text>
             </View>
           )}
           
-          {options.actions.map((action, index) => (
-            <Pressable
-              key={action.id}
-              style={[
-                styles.action,
-                index === 0 && !options.title && styles.firstAction,
-                index === options.actions.length - 1 && styles.lastAction,
-                action.destructive && styles.destructiveAction,
-              ]}
-              onPress={() => handleAction(action.id)}
-            >
-              <IconSymbol 
-                name={action.icon as any} 
-                size={20} 
-                color={action.destructive ? colors.error : (action.color || colors.text)} 
-              />
-              <Text style={[
-                styles.actionText,
-                action.destructive && styles.destructiveText,
-                action.color && { color: action.color }
-              ]}>
-                {action.title}
-              </Text>
-            </Pressable>
-          ))}
+          <View style={styles.actionsContainer}>
+            {options.actions.map((action, index) => (
+              <Pressable
+                key={action.id}
+                style={[
+                  styles.action,
+                  index === 0 && !options.title && styles.firstAction,
+                  index === options.actions.length - 1 && styles.lastAction,
+                  action.destructive && styles.destructiveAction,
+                ]}
+                onPress={() => handleAction(action.id)}
+              >
+                <IconSymbol 
+                  name={action.icon as any} 
+                  size={18} 
+                  color={action.destructive ? colors.error : (action.color || colors.text)} 
+                />
+                <Text style={[
+                  styles.actionText,
+                  action.destructive && styles.destructiveText,
+                  action.color && { color: action.color }
+                ]} numberOfLines={2}>
+                  {action.title}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
         </View>
       </Pressable>
     </Modal>
@@ -93,8 +95,9 @@ const styles = StyleSheet.create({
   menu: {
     backgroundColor: colors.card,
     borderRadius: 12,
-    minWidth: 200,
-    maxWidth: 280,
+    minWidth: 220,
+    maxWidth: 320,
+    maxHeight: screenHeight * 0.6,
     shadowColor: colors.black,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.25,
@@ -112,6 +115,10 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.text,
     textAlign: 'center',
+    lineHeight: 20,
+  },
+  actionsContainer: {
+    maxHeight: screenHeight * 0.4,
   },
   action: {
     flexDirection: 'row',
@@ -134,10 +141,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.errorLight,
   },
   actionText: {
-    fontSize: 16,
+    fontSize: 14,
     color: colors.text,
-    marginLeft: 12,
+    marginLeft: 10,
     flex: 1,
+    lineHeight: 18,
   },
   destructiveText: {
     color: colors.error,

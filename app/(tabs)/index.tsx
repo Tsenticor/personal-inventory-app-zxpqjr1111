@@ -8,7 +8,7 @@ import { ContextMenu } from '@/components/ContextMenu';
 import {
   View,
   Text,
-  FlatList,
+  ScrollView,
   Pressable,
   RefreshControl,
   Alert,
@@ -17,14 +17,22 @@ import {
 } from 'react-native';
 import React, { useState, useEffect, useCallback } from 'react';
 
+interface TreeNode {
+  item: InventoryItem;
+  children: TreeNode[];
+  isExpanded: boolean;
+  level: number;
+}
+
 export default function InventoryScreen() {
-  const [items, setItems] = useState<InventoryItem[]>([]);
-  const [sections, setSections] = useState<Section[]>([]);
-  const [selectedSectionId, setSelectedSectionId] = useState<string>('all');
+  const [allItems, setAllItems] = useState<InventoryItem[]>([]);
+  const [treeNodes, setTreeNodes] = useState<TreeNode[]>([]);
+  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showContextMenu, setShowContextMenu] = useState(false);
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
+  const [showMoveModal, setShowMoveModal] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -35,21 +43,17 @@ export default function InventoryScreen() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [itemsData, sectionsData] = await Promise.all([
-        storageService.getItems(),
-        storageService.getSections(),
-      ]);
+      const itemsData = await storageService.getItems();
       
       // Initialize default sections if none exist
-      if (sectionsData.length === 0) {
+      const sections = itemsData.filter(item => item.type === 'section');
+      if (sections.length === 0) {
         await storageService.initializeDefaultSections();
-        const newSectionsData = await storageService.getSections();
-        setSections(newSectionsData.filter(s => !s.isArchived));
+        const newItemsData = await storageService.getItems();
+        setAllItems(newItemsData.filter(item => !item.isArchived));
       } else {
-        setSections(sectionsData.filter(s => !s.isArchived));
+        setAllItems(itemsData.filter(item => !item.isArchived));
       }
-      
-      setItems(itemsData.filter(item => !item.isArchived));
     } catch (error) {
       console.log('Error loading data:', error);
       Alert.alert('Ошибка', 'Не удалось загрузить данные');
@@ -64,50 +68,70 @@ export default function InventoryScreen() {
     setRefreshing(false);
   }, []);
 
-  const filteredItems = selectedSectionId === 'all' 
-    ? items 
-    : items.filter(item => item.sectionId === selectedSectionId);
-
-  const renderSectionFilter = () => (
-    <View style={styles.sectionFilter}>
-      <Pressable
-        style={[
-          styles.sectionFilterItem,
-          selectedSectionId === 'all' && styles.sectionFilterItemActive
-        ]}
-        onPress={() => setSelectedSectionId('all')}
-      >
-        <Text style={[
-          styles.sectionFilterText,
-          selectedSectionId === 'all' && styles.sectionFilterTextActive
-        ]}>
-          Все ({items.length})
-        </Text>
-      </Pressable>
+  // Build tree structure
+  useEffect(() => {
+    const buildTree = (items: InventoryItem[]): TreeNode[] => {
+      const itemMap = new Map<string, InventoryItem>();
+      const rootItems: InventoryItem[] = [];
       
-      {sections.map((section) => {
-        const sectionItemCount = items.filter(item => item.sectionId === section.id).length;
-        return (
-          <Pressable
-            key={section.id}
-            style={[
-              styles.sectionFilterItem,
-              selectedSectionId === section.id && styles.sectionFilterItemActive
-            ]}
-            onPress={() => setSelectedSectionId(section.id)}
-          >
-            <Text style={styles.sectionEmoji}>{section.emoji}</Text>
-            <Text style={[
-              styles.sectionFilterText,
-              selectedSectionId === section.id && styles.sectionFilterTextActive
-            ]}>
-              {section.name} ({sectionItemCount})
-            </Text>
-          </Pressable>
+      // Create item map
+      items.forEach(item => {
+        itemMap.set(item.id, item);
+      });
+      
+      // Find root items (no parent or parent doesn't exist)
+      items.forEach(item => {
+        if (!item.parentId || !itemMap.has(item.parentId)) {
+          rootItems.push(item);
+        }
+      });
+      
+      const createTreeNode = (item: InventoryItem, level: number = 0): TreeNode => {
+        const children: TreeNode[] = [];
+        
+        // Find direct children
+        const directChildren = items.filter(child => child.parentId === item.id);
+        
+        // Find contained items
+        const containedItems = item.containedItems 
+          ? items.filter(child => item.containedItems!.includes(child.id))
+          : [];
+        
+        // Combine and deduplicate children
+        const allChildren = [...directChildren, ...containedItems];
+        const uniqueChildren = allChildren.filter((child, index, arr) => 
+          arr.findIndex(c => c.id === child.id) === index
         );
-      })}
-    </View>
-  );
+        
+        uniqueChildren.forEach(child => {
+          children.push(createTreeNode(child, level + 1));
+        });
+        
+        return {
+          item,
+          children,
+          isExpanded: expandedNodes.has(item.id),
+          level,
+        };
+      };
+      
+      return rootItems.map(item => createTreeNode(item));
+    };
+    
+    setTreeNodes(buildTree(allItems));
+  }, [allItems, expandedNodes]);
+
+  const toggleExpanded = (itemId: string) => {
+    setExpandedNodes(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(itemId)) {
+        newSet.delete(itemId);
+      } else {
+        newSet.add(itemId);
+      }
+      return newSet;
+    });
+  };
 
   const handleLongPress = (item: InventoryItem) => {
     setSelectedItem(item);
@@ -124,9 +148,12 @@ export default function InventoryScreen() {
       case 'edit':
         router.push(`/edit-item?id=${selectedItem.id}`);
         break;
+      case 'move':
+        setShowMoveModal(true);
+        break;
       case 'delete':
         Alert.alert(
-          'Удалить предмет',
+          selectedItem.type === 'section' ? 'Удалить раздел' : 'Удалить предмет',
           `Вы уверены, что хотите удалить "${selectedItem.name}"?`,
           [
             { text: 'Отмена', style: 'cancel' },
@@ -137,10 +164,10 @@ export default function InventoryScreen() {
                 try {
                   await storageService.deleteItem(selectedItem.id);
                   loadData();
-                  Alert.alert('Успешно', 'Предмет удален');
+                  Alert.alert('Успешно', selectedItem.type === 'section' ? 'Раздел удален' : 'Предмет удален');
                 } catch (error) {
                   console.log('Error deleting item:', error);
-                  Alert.alert('Ошибка', 'Не удалось удалить предмет');
+                  Alert.alert('Ошибка', 'Не удалось удалить');
                 }
               },
             },
@@ -150,76 +177,95 @@ export default function InventoryScreen() {
     }
   };
 
-  const renderItem = ({ item }: { item: InventoryItem }) => {
-    const section = sections.find(s => s.id === item.sectionId);
+  const renderTreeNode = (node: TreeNode): React.ReactNode => {
+    const { item, children, isExpanded, level } = node;
+    const hasChildren = children.length > 0;
+    const indentWidth = level * 20;
     
     return (
-      <Pressable
-        style={styles.itemCard}
-        onPress={() => router.push(`/item-detail?id=${item.id}`)}
-        onLongPress={() => handleLongPress(item)}
-      >
-        <View style={styles.itemHeader}>
-          {item.photo ? (
-            <Image source={{ uri: item.photo }} style={styles.itemImage} />
-          ) : (
-            <View style={[styles.itemImage, styles.itemImagePlaceholder]}>
-              <IconSymbol name="cube.box.fill" size={24} color={colors.textSecondary} />
-            </View>
-          )}
-          
-          <View style={styles.itemInfo}>
-            <Text style={styles.itemName} numberOfLines={1}>
-              {item.name}
-            </Text>
-            <Text style={styles.itemDescription} numberOfLines={2}>
-              {item.description || 'Без описания'}
-            </Text>
+      <View key={item.id}>
+        <Pressable
+          style={[styles.treeItem, { paddingLeft: 16 + indentWidth }]}
+          onPress={() => {
+            if (hasChildren) {
+              toggleExpanded(item.id);
+            } else {
+              router.push(`/item-detail?id=${item.id}`);
+            }
+          }}
+          onLongPress={() => handleLongPress(item)}
+        >
+          <View style={styles.treeItemContent}>
+            {hasChildren && (
+              <Pressable
+                style={styles.expandButton}
+                onPress={() => toggleExpanded(item.id)}
+              >
+                <IconSymbol 
+                  name={isExpanded ? "chevron.down" : "chevron.right"} 
+                  size={16} 
+                  color={colors.textSecondary} 
+                />
+              </Pressable>
+            )}
             
-            <View style={styles.itemMeta}>
-              <View style={styles.itemMetaItem}>
-                <Text style={styles.itemMetaLabel}>№{item.serialNumber}</Text>
+            {item.photo ? (
+              <Image source={{ uri: item.photo }} style={styles.treeItemImage} />
+            ) : (
+              <View style={[styles.treeItemImage, styles.treeItemImagePlaceholder]}>
+                <IconSymbol 
+                  name={item.type === 'section' ? "folder.fill" : "cube.box.fill"} 
+                  size={20} 
+                  color={item.type === 'section' ? (item.color || colors.primary) : colors.textSecondary} 
+                />
               </View>
-              {section && (
-                <View style={styles.itemMetaItem}>
-                  <Text style={styles.sectionEmoji}>{section.emoji}</Text>
-                  <Text style={styles.itemMetaLabel}>{section.name}</Text>
-                </View>
+            )}
+            
+            <View style={styles.treeItemInfo}>
+              <View style={styles.treeItemHeader}>
+                <Text style={[
+                  styles.treeItemName,
+                  item.type === 'section' && styles.sectionName
+                ]} numberOfLines={1}>
+                  {item.type === 'section' && item.emoji} {item.name}
+                </Text>
+                {hasChildren && (
+                  <Text style={styles.childrenCount}>
+                    ({children.length})
+                  </Text>
+                )}
+              </View>
+              
+              {item.description && (
+                <Text style={styles.treeItemDescription} numberOfLines={1}>
+                  {item.description}
+                </Text>
               )}
+              
+              <View style={styles.treeItemMeta}>
+                <Text style={styles.treeItemMetaText}>№{item.serialNumber}</Text>
+                {item.type !== 'section' && item.price > 0 && (
+                  <Text style={styles.treeItemPrice}>
+                    {item.price.toLocaleString()} ₽
+                  </Text>
+                )}
+                {item.type !== 'section' && item.quantity > 1 && (
+                  <Text style={styles.treeItemQuantity}>
+                    x{item.quantity}
+                  </Text>
+                )}
+                {item.isOnLoan && (
+                  <View style={styles.loanIndicator}>
+                    <IconSymbol name="arrow.up.right.square.fill" size={10} color={colors.warning} />
+                  </View>
+                )}
+              </View>
             </View>
           </View>
-          
-          <View style={styles.itemActions}>
-            <Text style={styles.itemPrice}>
-              {item.price > 0 ? `${item.price.toLocaleString()} ₽` : 'Бесплатно'}
-            </Text>
-            {item.quantity > 1 && (
-              <Text style={styles.itemQuantity}>
-                Кол-во: {item.quantity}
-              </Text>
-            )}
-            {item.isOnLoan && (
-              <View style={styles.loanBadge}>
-                <IconSymbol name="arrow.up.right.square.fill" size={12} color={colors.warning} />
-                <Text style={styles.loanBadgeText}>На выдаче</Text>
-              </View>
-            )}
-          </View>
-        </View>
+        </Pressable>
         
-        {item.tags.length > 0 && (
-          <View style={styles.itemTags}>
-            {item.tags.slice(0, 3).map((tag, index) => (
-              <View key={index} style={styles.itemTag}>
-                <Text style={styles.itemTagText}>{tag}</Text>
-              </View>
-            ))}
-            {item.tags.length > 3 && (
-              <Text style={styles.itemTagsMore}>+{item.tags.length - 3}</Text>
-            )}
-          </View>
-        )}
-      </Pressable>
+        {isExpanded && children.map(child => renderTreeNode(child))}
+      </View>
     );
   };
 
@@ -227,31 +273,43 @@ export default function InventoryScreen() {
     <View style={styles.emptyState}>
       <IconSymbol name="cube.box" size={64} color={colors.textSecondary} />
       <Text style={styles.emptyStateTitle}>
-        {selectedSectionId === 'all' ? 'Нет предметов' : 'Нет предметов в этом разделе'}
+        Инвентарь пуст
       </Text>
       <Text style={styles.emptyStateDescription}>
-        Добавьте первый предмет, нажав кнопку "+" внизу экрана
+        Добавьте первый предмет или раздел, нажав кнопку "+" внизу экрана
       </Text>
-      <Pressable
-        style={[commonStyles.button, { backgroundColor: colors.primary, marginTop: 16 }]}
-        onPress={() => router.push(`/add-item${selectedSectionId !== 'all' ? `?sectionId=${selectedSectionId}` : ''}`)}
-      >
-        <IconSymbol name="plus" size={20} color={colors.white} />
-        <Text style={[commonStyles.buttonText, { color: colors.white, marginLeft: 8 }]}>
-          Добавить предмет
-        </Text>
-      </Pressable>
+      <View style={styles.emptyStateButtons}>
+        <Pressable
+          style={[commonStyles.button, { backgroundColor: colors.primary, marginRight: 8 }]}
+          onPress={() => router.push('/add-item')}
+        >
+          <IconSymbol name="plus" size={20} color={colors.white} />
+          <Text style={[commonStyles.buttonText, { color: colors.white, marginLeft: 8 }]}>
+            Добавить предмет
+          </Text>
+        </Pressable>
+        <Pressable
+          style={[commonStyles.button, { backgroundColor: colors.secondary }]}
+          onPress={() => router.push('/add-section')}
+        >
+          <IconSymbol name="folder.badge.plus" size={20} color={colors.white} />
+          <Text style={[commonStyles.buttonText, { color: colors.white, marginLeft: 8 }]}>
+            Добавить раздел
+          </Text>
+        </Pressable>
+      </View>
     </View>
   );
 
   const getTotalStats = () => {
-    const totalValue = filteredItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-    const totalWeight = filteredItems.reduce((sum, item) => sum + (item.weight * item.quantity), 0);
+    const items = allItems.filter(item => item.type !== 'section');
+    const totalValue = items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+    const totalWeight = items.reduce((sum, item) => sum + (item.weight * item.quantity), 0);
     
-    return { totalValue, totalWeight };
+    return { totalValue, totalWeight, totalItems: items.length };
   };
 
-  const { totalValue, totalWeight } = getTotalStats();
+  const { totalValue, totalWeight, totalItems } = getTotalStats();
 
   if (loading) {
     return (
@@ -263,12 +321,11 @@ export default function InventoryScreen() {
 
   return (
     <View style={[commonStyles.container, { backgroundColor: colors.background }]}>
-      {renderSectionFilter()}
-      
-      {filteredItems.length > 0 && (
+      {/* Stats Bar */}
+      {totalItems > 0 && (
         <View style={styles.statsBar}>
           <Text style={styles.statsText}>
-            Предметов: {filteredItems.length}
+            Предметов: {totalItems}
           </Text>
           {totalValue > 0 && (
             <Text style={styles.statsText}>
@@ -283,11 +340,9 @@ export default function InventoryScreen() {
         </View>
       )}
       
-      <FlatList
-        data={filteredItems}
-        renderItem={renderItem}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={filteredItems.length === 0 ? styles.emptyContainer : styles.listContainer}
+      <ScrollView
+        style={styles.treeContainer}
+        contentContainerStyle={treeNodes.length === 0 ? styles.emptyContainer : styles.treeContent}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -295,17 +350,30 @@ export default function InventoryScreen() {
             tintColor={colors.primary}
           />
         }
-        ListEmptyComponent={renderEmptyState}
         showsVerticalScrollIndicator={false}
-      />
-      
-      {/* Floating Add Button */}
-      <Pressable
-        style={styles.fab}
-        onPress={() => router.push(`/add-item${selectedSectionId !== 'all' ? `?sectionId=${selectedSectionId}` : ''}`)}
       >
-        <IconSymbol name="plus" size={24} color={colors.white} />
-      </Pressable>
+        {treeNodes.length > 0 ? (
+          treeNodes.map(node => renderTreeNode(node))
+        ) : (
+          renderEmptyState()
+        )}
+      </ScrollView>
+      
+      {/* Floating Add Buttons */}
+      <View style={styles.fabContainer}>
+        <Pressable
+          style={[styles.fab, styles.fabSecondary]}
+          onPress={() => router.push('/add-section')}
+        >
+          <IconSymbol name="folder.badge.plus" size={20} color={colors.white} />
+        </Pressable>
+        <Pressable
+          style={styles.fab}
+          onPress={() => router.push('/add-item')}
+        >
+          <IconSymbol name="plus" size={24} color={colors.white} />
+        </Pressable>
+      </View>
 
       {/* Context Menu */}
       <ContextMenu
@@ -327,6 +395,12 @@ export default function InventoryScreen() {
               color: colors.info,
             },
             {
+              id: 'move',
+              title: 'Переместить',
+              icon: 'arrow.right.circle',
+              color: colors.secondary,
+            },
+            {
               id: 'delete',
               title: 'Удалить',
               icon: 'trash.fill',
@@ -336,46 +410,64 @@ export default function InventoryScreen() {
         }}
         onAction={handleContextAction}
       />
+
+      {/* Move Modal */}
+      <ContextMenu
+        visible={showMoveModal}
+        onClose={() => setShowMoveModal(false)}
+        options={{
+          title: `Переместить "${selectedItem?.name}"`,
+          actions: allItems
+            .filter(item => 
+              item.id !== selectedItem?.id && 
+              !item.isArchived &&
+              (item.type === 'section' || item.type === 'item')
+            )
+            .slice(0, 15) // Limit for performance
+            .map(item => ({
+              id: item.id,
+              title: item.type === 'section' 
+                ? `📁 ${item.emoji} ${item.name}`
+                : `📦 ${item.name}`,
+              icon: item.type === 'section' ? 'folder.fill' : 'cube.box.fill',
+              color: item.type === 'section' ? (item.color || colors.primary) : colors.secondary,
+            }))
+        }}
+        onAction={async (targetId: string) => {
+          if (!selectedItem) return;
+          
+          try {
+            const targetItem = allItems.find(i => i.id === targetId);
+            
+            if (targetItem?.type === 'section') {
+              // Move to section
+              await storageService.updateItem(selectedItem.id, {
+                sectionId: targetId,
+                parentId: undefined,
+              });
+            } else {
+              // Move into another item as container
+              await storageService.updateItem(selectedItem.id, {
+                parentId: targetId,
+              });
+              
+              // Add to container's contained items
+              await storageService.addItemToContainer(targetId, selectedItem.id);
+            }
+            
+            loadData();
+            Alert.alert('Успешно', `"${selectedItem.name}" перемещен в "${targetItem?.name}"`);
+          } catch (error) {
+            console.log('Error moving item:', error);
+            Alert.alert('Ошибка', 'Не удалось переместить предмет');
+          }
+        }}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  sectionFilter: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: colors.background,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  sectionFilterItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    marginRight: 8,
-    borderRadius: 20,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  sectionFilterItemActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  sectionFilterText: {
-    fontSize: 14,
-    color: colors.text,
-    fontWeight: '500',
-  },
-  sectionFilterTextActive: {
-    color: colors.white,
-  },
-  sectionEmoji: {
-    fontSize: 14,
-    marginRight: 4,
-  },
   statsBar: {
     flexDirection: 'row',
     justifyContent: 'space-around',
@@ -390,8 +482,10 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontWeight: '500',
   },
-  listContainer: {
-    padding: 16,
+  treeContainer: {
+    flex: 1,
+  },
+  treeContent: {
     paddingBottom: 100,
   },
   emptyContainer: {
@@ -418,116 +512,104 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 22,
   },
-  itemCard: {
-    backgroundColor: colors.card,
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  itemHeader: {
+  emptyStateButtons: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    marginTop: 16,
   },
-  itemImage: {
-    width: 60,
-    height: 60,
+  treeItem: {
+    backgroundColor: colors.card,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    paddingVertical: 12,
+    paddingRight: 16,
+  },
+  treeItemContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  expandButton: {
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+  },
+  treeItemImage: {
+    width: 40,
+    height: 40,
     borderRadius: 8,
     marginRight: 12,
   },
-  itemImagePlaceholder: {
+  treeItemImagePlaceholder: {
     backgroundColor: colors.backgroundSecondary,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  itemInfo: {
+  treeItemInfo: {
     flex: 1,
-    marginRight: 12,
   },
-  itemName: {
+  treeItemHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 2,
+  },
+  treeItemName: {
     fontSize: 16,
     fontWeight: '600',
     color: colors.text,
-    marginBottom: 4,
+    flex: 1,
   },
-  itemDescription: {
+  sectionName: {
+    color: colors.primary,
+    fontWeight: '700',
+  },
+  childrenCount: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    fontWeight: '500',
+    marginLeft: 8,
+  },
+  treeItemDescription: {
     fontSize: 14,
     color: colors.textSecondary,
-    lineHeight: 18,
-    marginBottom: 8,
+    marginBottom: 4,
   },
-  itemMeta: {
+  treeItemMeta: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  itemMetaItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  treeItemMetaText: {
+    fontSize: 12,
+    color: colors.textSecondary,
     marginRight: 12,
   },
-  itemMetaLabel: {
+  treeItemPrice: {
     fontSize: 12,
-    color: colors.textSecondary,
-    fontWeight: '500',
-  },
-  itemActions: {
-    alignItems: 'flex-end',
-  },
-  itemPrice: {
-    fontSize: 16,
-    fontWeight: '700',
     color: colors.success,
-    marginBottom: 4,
-  },
-  itemQuantity: {
-    fontSize: 12,
-    color: colors.textSecondary,
-    marginBottom: 4,
-  },
-  loanBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.warningLight,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  loanBadgeText: {
-    fontSize: 10,
-    color: colors.warning,
-    marginLeft: 2,
     fontWeight: '600',
+    marginRight: 12,
   },
-  itemTags: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-  itemTag: {
-    backgroundColor: colors.primaryLight,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    marginRight: 6,
-  },
-  itemTagText: {
+  treeItemQuantity: {
     fontSize: 12,
-    color: colors.primary,
+    color: colors.info,
     fontWeight: '500',
+    marginRight: 8,
   },
-  itemTagsMore: {
-    fontSize: 12,
-    color: colors.textSecondary,
-    fontStyle: 'italic',
+  loanIndicator: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: colors.warningLight,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  fab: {
+  fabContainer: {
     position: 'absolute',
     bottom: 24,
     right: 24,
+    alignItems: 'flex-end',
+  },
+  fab: {
     width: 56,
     height: 56,
     borderRadius: 28,
@@ -539,5 +621,13 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
+    marginBottom: 12,
+  },
+  fabSecondary: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.secondary,
+    shadowColor: colors.secondary,
   },
 });

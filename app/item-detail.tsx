@@ -28,6 +28,7 @@ export default function ItemDetailScreen() {
   const [events, setEvents] = useState<EventLog[]>([]);
   const [sections, setSections] = useState<Section[]>([]);
   const [containedItems, setContainedItems] = useState<InventoryItem[]>([]);
+  const [allItems, setAllItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [showQuantitySelector, setShowQuantitySelector] = useState(false);
   const [showMoveMenu, setShowMoveMenu] = useState(false);
@@ -49,9 +50,10 @@ export default function ItemDetailScreen() {
 
       setItem(foundItem);
 
-      // Load sections
+      // Load sections and all items
       const sectionsData = await storageService.getSections();
       setSections(sectionsData);
+      setAllItems(items);
       const itemSection = sectionsData.find(s => s.id === foundItem.sectionId);
       setSection(itemSection || null);
 
@@ -63,6 +65,10 @@ export default function ItemDetailScreen() {
       if (foundItem.containedItems && foundItem.containedItems.length > 0) {
         const contained = await storageService.getContainedItems(itemId);
         setContainedItems(contained);
+      } else {
+        // Also check for items that have this item as parent
+        const childItems = items.filter(item => item.parentId === itemId);
+        setContainedItems(childItems);
       }
     } catch (error) {
       console.log('Error loading item data:', error);
@@ -174,26 +180,43 @@ export default function ItemDetailScreen() {
     }
   };
 
-  const handleMoveItem = (targetSectionId: string) => {
+  const handleMoveItem = (targetId: string) => {
     if (!item) return;
+
+    const allItems = [...sections, ...containedItems];
+    const targetItem = allItems.find(i => i.id === targetId);
+    const targetName = targetItem?.name || 'выбранное место';
 
     Alert.alert(
       'Переместить предмет',
-      `Переместить "${item.name}" в выбранный раздел?`,
+      `Переместить "${item.name}" в "${targetName}"?`,
       [
         { text: 'Отмена', style: 'cancel' },
         {
           text: 'Переместить',
           onPress: async () => {
             try {
-              const targetSection = sections.find(s => s.id === targetSectionId);
-              const updatedItem = await storageService.updateItem(itemId, {
-                sectionId: targetSectionId,
-              });
+              let updatedItem;
+              
+              if (targetItem?.type === 'section') {
+                // Move to section
+                updatedItem = await storageService.updateItem(itemId, {
+                  sectionId: targetId,
+                  parentId: undefined,
+                });
+              } else {
+                // Move into another item as container
+                updatedItem = await storageService.updateItem(itemId, {
+                  parentId: targetId,
+                });
+                
+                // Add to container's contained items
+                await storageService.addItemToContainer(targetId, itemId);
+              }
 
               if (updatedItem) {
                 loadItemData();
-                Alert.alert('Успешно', `Предмет перемещен в "${targetSection?.name}"`);
+                Alert.alert('Успешно', `Предмет перемещен в "${targetName}"`);
               } else {
                 Alert.alert('Ошибка', 'Не удалось переместить предмет');
               }
@@ -537,15 +560,28 @@ ${item.tags.length > 0 ? `\nТеги: ${item.tags.join(', ')}` : ''}
         visible={showMoveMenu}
         onClose={() => setShowMoveMenu(false)}
         options={{
-          title: 'Переместить в раздел',
-          actions: sections
-            .filter(s => s.id !== item.sectionId)
-            .map(s => ({
-              id: s.id,
-              title: `${s.emoji} ${s.name}`,
-              icon: 'folder.fill',
-              color: s.color,
-            }))
+          title: 'Переместить в',
+          actions: [
+            // Sections
+            ...sections
+              .filter(s => s.id !== item.sectionId && s.id !== item.id)
+              .map(s => ({
+                id: s.id,
+                title: `📁 ${s.emoji} ${s.name}`,
+                icon: 'folder.fill',
+                color: s.color,
+              })),
+            // Other items that can be containers
+            ...allItems
+              .filter(i => i.id !== item.id && i.type !== 'section' && !i.isArchived)
+              .slice(0, 10) // Limit to first 10 items for performance
+              .map(i => ({
+                id: i.id,
+                title: `📦 ${i.name}`,
+                icon: 'cube.box.fill',
+                color: colors.secondary,
+              }))
+          ]
         }}
         onAction={handleMoveItem}
       />

@@ -39,15 +39,7 @@ export default function TabLayout() {
           ),
         }}
       />
-      <Tabs.Screen
-        name="sections"
-        options={{
-          title: 'Разделы',
-          tabBarIcon: ({ color, focused }) => (
-            <IconSymbol size={24} name={focused ? "folder.fill" : "folder"} color={color} />
-          ),
-        }}
-      />
+
       <Tabs.Screen
         name="search"
         options={{
