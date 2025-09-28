@@ -44,15 +44,7 @@ export default function AddSectionScreen() {
   const [selectedViewType, setSelectedViewType] = useState<'list' | 'grid' | 'cards'>('list');
   const [loading, setLoading] = useState(false);
 
-  useFocusEffect(
-    useCallback(() => {
-      if (isEditing) {
-        loadSection();
-      }
-    }, [isEditing, sectionId])
-  );
-
-  const loadSection = async () => {
+  const loadSection = useCallback(async () => {
     try {
       const sections = await storageService.getSections();
       const section = sections.find(s => s.id === sectionId);
@@ -68,7 +60,15 @@ export default function AddSectionScreen() {
       console.log('Error loading section:', error);
       Alert.alert('Ошибка', 'Не удалось загрузить данные раздела');
     }
-  };
+  }, [sectionId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (isEditing) {
+        loadSection();
+      }
+    }, [isEditing, loadSection])
+  );
 
   const handleSave = async () => {
     if (!name.trim()) {

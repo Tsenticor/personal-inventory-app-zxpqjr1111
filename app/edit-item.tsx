@@ -46,15 +46,7 @@ export default function EditItemScreen() {
   const [tags, setTags] = useState<string[]>([]);
   const [newTag, setNewTag] = useState('');
 
-  useFocusEffect(
-    useCallback(() => {
-      if (itemId) {
-        loadItemData();
-      }
-    }, [itemId])
-  );
-
-  const loadItemData = async () => {
+  const loadItemData = useCallback(async () => {
     try {
       const [items, sectionsData] = await Promise.all([
         storageService.getItems(),
@@ -86,7 +78,15 @@ export default function EditItemScreen() {
       console.log('Error loading item data:', error);
       Alert.alert('Ошибка', 'Не удалось загрузить данные предмета');
     }
-  };
+  }, [itemId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (itemId) {
+        loadItemData();
+      }
+    }, [itemId, loadItemData])
+  );
 
   const handleImagePicker = async () => {
     try {
