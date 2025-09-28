@@ -1,10 +1,11 @@
 
 import { commonStyles, colors } from '@/styles/commonStyles';
-import { InventoryItem, Section } from '@/types/inventory';
+import { InventoryItem } from '@/types/inventory';
 import { storageService } from '@/services/storageService';
 import { router, useFocusEffect } from 'expo-router';
 import { IconSymbol } from '@/components/IconSymbol';
 import { ContextMenu } from '@/components/ContextMenu';
+import { TreePlacementMenu } from '@/components/TreePlacementMenu';
 import {
   View,
   Text,
@@ -44,16 +45,7 @@ export default function InventoryScreen() {
     try {
       setLoading(true);
       const itemsData = await storageService.getItems();
-      
-      // Initialize default sections if none exist
-      const sections = itemsData.filter(item => item.type === 'section');
-      if (sections.length === 0) {
-        await storageService.initializeDefaultSections();
-        const newItemsData = await storageService.getItems();
-        setAllItems(newItemsData.filter(item => !item.isArchived));
-      } else {
-        setAllItems(itemsData.filter(item => !item.isArchived));
-      }
+      setAllItems(itemsData.filter(item => !item.isArchived));
     } catch (error) {
       console.log('Error loading data:', error);
       Alert.alert('Ошибка', 'Не удалось загрузить данные');
@@ -68,7 +60,7 @@ export default function InventoryScreen() {
     setRefreshing(false);
   }, []);
 
-  // Build tree structure
+  // Build tree structure with all subgroups collapsed by default
   useEffect(() => {
     const buildTree = (items: InventoryItem[]): TreeNode[] => {
       const itemMap = new Map<string, InventoryItem>();
@@ -87,6 +79,16 @@ export default function InventoryScreen() {
       });
       
       const createTreeNode = (item: InventoryItem, level: number = 0): TreeNode => {
+        // Limit tree depth to prevent infinite recursion
+        if (level >= 20) {
+          return {
+            item,
+            children: [],
+            isExpanded: false,
+            level,
+          };
+        }
+
         const children: TreeNode[] = [];
         
         // Find direct children
@@ -177,10 +179,52 @@ export default function InventoryScreen() {
     }
   };
 
+  const handleMoveItem = async (targetId: string) => {
+    if (!selectedItem) return;
+    
+    try {
+      const targetItem = allItems.find(i => i.id === targetId);
+      
+      // Remove from old container if needed
+      if (selectedItem.parentId) {
+        await storageService.removeItemFromContainer(selectedItem.parentId, selectedItem.id);
+      }
+      
+      if (targetItem?.type === 'section') {
+        // Move to section
+        await storageService.updateItem(selectedItem.id, {
+          sectionId: targetId,
+          parentId: undefined,
+        });
+      } else {
+        // Move into another item as container
+        await storageService.updateItem(selectedItem.id, {
+          parentId: targetId,
+          sectionId: targetItem?.sectionId || selectedItem.sectionId,
+        });
+        
+        // Add to container's contained items
+        await storageService.addItemToContainer(targetId, selectedItem.id);
+      }
+      
+      loadData();
+      Alert.alert('Успешно', `"${selectedItem.name}" перемещен в "${targetItem?.name}"`);
+    } catch (error) {
+      console.log('Error moving item:', error);
+      Alert.alert('Ошибка', 'Не удалось переместить предмет');
+    }
+  };
+
   const renderTreeNode = (node: TreeNode): React.ReactNode => {
     const { item, children, isExpanded, level } = node;
     const hasChildren = children.length > 0;
-    const indentWidth = level * 20;
+    const indentWidth = Math.min(level * 20, 200); // Max indent to prevent overflow
+    
+    // Truncate text if it's too long based on level
+    const maxTextLength = Math.max(30 - level * 2, 15);
+    const truncatedName = item.name.length > maxTextLength 
+      ? item.name.substring(0, maxTextLength - 3) + '...'
+      : item.name;
     
     return (
       <View key={item.id}>
@@ -227,7 +271,7 @@ export default function InventoryScreen() {
                   styles.treeItemName,
                   item.type === 'section' && styles.sectionName
                 ]} numberOfLines={1}>
-                  {item.type === 'section' && item.emoji} {item.name}
+                  {item.type === 'section' && item.emoji} {truncatedName}
                 </Text>
                 {hasChildren && (
                   <Text style={styles.childrenCount}>
@@ -238,7 +282,7 @@ export default function InventoryScreen() {
               
               {item.description && (
                 <Text style={styles.treeItemDescription} numberOfLines={1}>
-                  {item.description}
+                  {item.description.length > 40 ? item.description.substring(0, 37) + '...' : item.description}
                 </Text>
               )}
               
@@ -350,7 +394,8 @@ export default function InventoryScreen() {
             tintColor={colors.primary}
           />
         }
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator={true}
+        nestedScrollEnabled={true}
       >
         {treeNodes.length > 0 ? (
           treeNodes.map(node => renderTreeNode(node))
@@ -411,57 +456,16 @@ export default function InventoryScreen() {
         onAction={handleContextAction}
       />
 
-      {/* Move Modal */}
-      <ContextMenu
+      {/* Tree Move Menu */}
+      <TreePlacementMenu
         visible={showMoveModal}
         onClose={() => setShowMoveModal(false)}
-        options={{
-          title: `Переместить "${selectedItem?.name}"`,
-          actions: allItems
-            .filter(item => 
-              item.id !== selectedItem?.id && 
-              !item.isArchived &&
-              (item.type === 'section' || item.type === 'item')
-            )
-            .slice(0, 15) // Limit for performance
-            .map(item => ({
-              id: item.id,
-              title: item.type === 'section' 
-                ? `📁 ${item.emoji} ${item.name}`
-                : `📦 ${item.name}`,
-              icon: item.type === 'section' ? 'folder.fill' : 'cube.box.fill',
-              color: item.type === 'section' ? (item.color || colors.primary) : colors.secondary,
-            }))
-        }}
-        onAction={async (targetId: string) => {
-          if (!selectedItem) return;
-          
-          try {
-            const targetItem = allItems.find(i => i.id === targetId);
-            
-            if (targetItem?.type === 'section') {
-              // Move to section
-              await storageService.updateItem(selectedItem.id, {
-                sectionId: targetId,
-                parentId: undefined,
-              });
-            } else {
-              // Move into another item as container
-              await storageService.updateItem(selectedItem.id, {
-                parentId: targetId,
-              });
-              
-              // Add to container's contained items
-              await storageService.addItemToContainer(targetId, selectedItem.id);
-            }
-            
-            loadData();
-            Alert.alert('Успешно', `"${selectedItem.name}" перемещен в "${targetItem?.name}"`);
-          } catch (error) {
-            console.log('Error moving item:', error);
-            Alert.alert('Ошибка', 'Не удалось переместить предмет');
-          }
-        }}
+        onSelect={handleMoveItem}
+        items={allItems}
+        selectedItemId={selectedItem?.id}
+        excludeItemId={selectedItem?.id}
+        title={`Переместить "${selectedItem?.name}"`}
+        maxLevels={20}
       />
     </View>
   );

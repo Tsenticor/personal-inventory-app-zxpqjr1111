@@ -12,21 +12,19 @@ import {
 } from 'react-native';
 import { Stack, router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { IconSymbol } from '@/components/IconSymbol';
+import { TreePlacementMenu } from '@/components/TreePlacementMenu';
 import { commonStyles, colors } from '@/styles/commonStyles';
 import { storageService } from '@/services/storageService';
 import { searchService } from '@/services/searchService';
-import { InventoryItem, Section, EventLog } from '@/types/inventory';
+import { InventoryItem, EventLog } from '@/types/inventory';
 import { QuantitySelector } from '@/components/QuantitySelector';
-import { ContextMenu } from '@/components/ContextMenu';
 
 export default function ItemDetailScreen() {
   const params = useLocalSearchParams();
   const itemId = params.id as string;
 
   const [item, setItem] = useState<InventoryItem | null>(null);
-  const [section, setSection] = useState<Section | null>(null);
   const [events, setEvents] = useState<EventLog[]>([]);
-  const [sections, setSections] = useState<Section[]>([]);
   const [containedItems, setContainedItems] = useState<InventoryItem[]>([]);
   const [allItems, setAllItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,13 +47,7 @@ export default function ItemDetailScreen() {
       }
 
       setItem(foundItem);
-
-      // Load sections and all items
-      const sectionsData = await storageService.getSections();
-      setSections(sectionsData);
       setAllItems(items);
-      const itemSection = sectionsData.find(s => s.id === foundItem.sectionId);
-      setSection(itemSection || null);
 
       // Load events for this item
       const itemEvents = await storageService.getEventsByItem(itemId);
@@ -180,64 +172,61 @@ export default function ItemDetailScreen() {
     }
   };
 
-  const handleMoveItem = (targetId: string) => {
+  const handleMoveItem = async (targetId: string) => {
     if (!item) return;
 
-    const allItems = [...sections, ...containedItems];
     const targetItem = allItems.find(i => i.id === targetId);
     const targetName = targetItem?.name || 'выбранное место';
 
-    Alert.alert(
-      'Переместить предмет',
-      `Переместить "${item.name}" в "${targetName}"?`,
-      [
-        { text: 'Отмена', style: 'cancel' },
-        {
-          text: 'Переместить',
-          onPress: async () => {
-            try {
-              let updatedItem;
-              
-              if (targetItem?.type === 'section') {
-                // Move to section
-                updatedItem = await storageService.updateItem(itemId, {
-                  sectionId: targetId,
-                  parentId: undefined,
-                });
-              } else {
-                // Move into another item as container
-                updatedItem = await storageService.updateItem(itemId, {
-                  parentId: targetId,
-                });
-                
-                // Add to container's contained items
-                await storageService.addItemToContainer(targetId, itemId);
-              }
+    try {
+      // Remove from old container if needed
+      if (item.parentId) {
+        await storageService.removeItemFromContainer(item.parentId, itemId);
+      }
 
-              if (updatedItem) {
-                loadItemData();
-                Alert.alert('Успешно', `Предмет перемещен в "${targetName}"`);
-              } else {
-                Alert.alert('Ошибка', 'Не удалось переместить предмет');
-              }
-            } catch (error) {
-              console.log('Error moving item:', error);
-              Alert.alert('Ошибка', 'Не удалось переместить предмет');
-            }
-          }
-        }
-      ]
-    );
+      let updatedItem;
+      
+      if (targetItem?.type === 'section') {
+        // Move to section
+        updatedItem = await storageService.updateItem(itemId, {
+          sectionId: targetId,
+          parentId: undefined,
+        });
+      } else {
+        // Move into another item as container
+        updatedItem = await storageService.updateItem(itemId, {
+          parentId: targetId,
+          sectionId: targetItem?.sectionId || item.sectionId,
+        });
+        
+        // Add to container's contained items
+        await storageService.addItemToContainer(targetId, itemId);
+      }
+
+      if (updatedItem) {
+        loadItemData();
+        Alert.alert('Успешно', `Предмет перемещен в "${targetName}"`);
+      } else {
+        Alert.alert('Ошибка', 'Не удалось переместить предмет');
+      }
+    } catch (error) {
+      console.log('Error moving item:', error);
+      Alert.alert('Ошибка', 'Не удалось переместить предмет');
+    }
   };
 
   const handleShare = async () => {
     if (!item) return;
 
     try {
+      const currentPlacement = allItems.find(i => 
+        i.id === (item.parentId || item.sectionId)
+      );
+
       const shareText = `
 ${item.name}
 ${item.description ? `\n${item.description}` : ''}
-${section ? `\nРаздел: ${section.name}` : ''}
+${currentPlacement ? `\nРазмещение: ${currentPlacement.name}` : ''}
 ${item.price > 0 ? `\nЦена: ${item.price.toLocaleString()} ₽` : ''}
 ${item.weight > 0 ? `\nВес: ${item.weight} кг` : ''}
 ${item.quantity > 1 ? `\nКоличество: ${item.quantity}` : ''}
@@ -318,6 +307,10 @@ ${item.tags.length > 0 ? `\nТеги: ${item.tags.join(', ')}` : ''}
     );
   }
 
+  const currentPlacement = allItems.find(i => 
+    i.id === (item.parentId || item.sectionId)
+  );
+
   return (
     <>
       <Stack.Screen
@@ -354,10 +347,16 @@ ${item.tags.length > 0 ? `\nТеги: ${item.tags.join(', ')}` : ''}
               <Text style={styles.itemName}>{item.name}</Text>
               <Text style={styles.serialNumber}>№ {item.serialNumber}</Text>
               
-              {section && (
-                <View style={styles.sectionInfo}>
-                  <Text style={styles.sectionEmoji}>{section.emoji}</Text>
-                  <Text style={styles.sectionName}>{section.name}</Text>
+              {currentPlacement && (
+                <View style={styles.placementInfo}>
+                  <IconSymbol 
+                    name={currentPlacement.type === 'section' ? "folder.fill" : "cube.box.fill"} 
+                    size={16} 
+                    color={currentPlacement.type === 'section' ? (currentPlacement.color || colors.primary) : colors.textSecondary} 
+                  />
+                  <Text style={styles.placementName}>
+                    {currentPlacement.type === 'section' && currentPlacement.emoji} {currentPlacement.name}
+                  </Text>
                 </View>
               )}
               
@@ -555,35 +554,15 @@ ${item.tags.length > 0 ? `\nТеги: ${item.tags.join(', ')}` : ''}
         itemName={item.name}
       />
 
-      {/* Move Menu Modal */}
-      <ContextMenu
+      {/* Tree Move Menu */}
+      <TreePlacementMenu
         visible={showMoveMenu}
         onClose={() => setShowMoveMenu(false)}
-        options={{
-          title: 'Переместить в',
-          actions: [
-            // Sections
-            ...sections
-              .filter(s => s.id !== item.sectionId && s.id !== item.id)
-              .map(s => ({
-                id: s.id,
-                title: `📁 ${s.emoji} ${s.name}`,
-                icon: 'folder.fill',
-                color: s.color,
-              })),
-            // Other items that can be containers
-            ...allItems
-              .filter(i => i.id !== item.id && i.type !== 'section' && !i.isArchived)
-              .slice(0, 10) // Limit to first 10 items for performance
-              .map(i => ({
-                id: i.id,
-                title: `📦 ${i.name}`,
-                icon: 'cube.box.fill',
-                color: colors.secondary,
-              }))
-          ]
-        }}
-        onAction={handleMoveItem}
+        onSelect={handleMoveItem}
+        items={allItems.filter(i => !i.isArchived)}
+        excludeItemId={itemId} // Exclude current item and its descendants
+        title="Переместить в"
+        maxLevels={20}
       />
     </>
   );
@@ -629,19 +608,16 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     marginBottom: 8,
   },
-  sectionInfo: {
+  placementInfo: {
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 12,
   },
-  sectionEmoji: {
-    fontSize: 16,
-    marginRight: 6,
-  },
-  sectionName: {
+  placementName: {
     fontSize: 16,
     color: colors.text,
     fontWeight: '500',
+    marginLeft: 6,
   },
   statusBadges: {
     flexDirection: 'row',

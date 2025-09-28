@@ -12,9 +12,10 @@ import {
 } from 'react-native';
 import { Stack, router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { IconSymbol } from '@/components/IconSymbol';
+import { TreePlacementMenu } from '@/components/TreePlacementMenu';
 import { commonStyles, colors } from '@/styles/commonStyles';
 import { storageService } from '@/services/storageService';
-import { InventoryItem, Section } from '@/types/inventory';
+import { InventoryItem } from '@/types/inventory';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 
@@ -31,7 +32,9 @@ export default function EditItemScreen() {
   const itemId = params.id as string;
 
   const [item, setItem] = useState<InventoryItem | null>(null);
-  const [sections, setSections] = useState<Section[]>([]);
+  const [allItems, setAllItems] = useState<InventoryItem[]>([]);
+  const [selectedPlacement, setSelectedPlacement] = useState<InventoryItem | null>(null);
+  const [showPlacementMenu, setShowPlacementMenu] = useState(false);
   const [loading, setLoading] = useState(false);
 
   // Form fields
@@ -41,16 +44,14 @@ export default function EditItemScreen() {
   const [price, setPrice] = useState('');
   const [weight, setWeight] = useState('');
   const [quantity, setQuantity] = useState('');
-  const [selectedSectionId, setSelectedSectionId] = useState('');
   const [selectedCondition, setSelectedCondition] = useState<InventoryItem['condition']>('good');
   const [tags, setTags] = useState<string[]>([]);
   const [newTag, setNewTag] = useState('');
 
   const loadItemData = useCallback(async () => {
     try {
-      const [items, sectionsData] = await Promise.all([
+      const [items] = await Promise.all([
         storageService.getItems(),
-        storageService.getSections(),
       ]);
 
       const foundItem = items.find(i => i.id === itemId);
@@ -62,7 +63,16 @@ export default function EditItemScreen() {
       }
 
       setItem(foundItem);
-      setSections(sectionsData);
+      setAllItems(items.filter(item => !item.isArchived));
+
+      // Find current placement
+      let currentPlacement: InventoryItem | null = null;
+      if (foundItem.parentId) {
+        currentPlacement = items.find(i => i.id === foundItem.parentId) || null;
+      } else if (foundItem.sectionId) {
+        currentPlacement = items.find(i => i.id === foundItem.sectionId) || null;
+      }
+      setSelectedPlacement(currentPlacement);
 
       // Populate form fields
       setName(foundItem.name);
@@ -71,7 +81,6 @@ export default function EditItemScreen() {
       setPrice(foundItem.price.toString());
       setWeight(foundItem.weight.toString());
       setQuantity(foundItem.quantity.toString());
-      setSelectedSectionId(foundItem.sectionId);
       setSelectedCondition(foundItem.condition);
       setTags(foundItem.tags);
     } catch (error) {
@@ -87,6 +96,13 @@ export default function EditItemScreen() {
       }
     }, [itemId, loadItemData])
   );
+
+  const handlePlacementSelect = (selectedItemId: string) => {
+    const selectedItem = allItems.find(item => item.id === selectedItemId);
+    if (selectedItem) {
+      setSelectedPlacement(selectedItem);
+    }
+  };
 
   const handleImagePicker = async () => {
     try {
@@ -164,13 +180,18 @@ export default function EditItemScreen() {
       return;
     }
 
-    if (!selectedSectionId) {
-      Alert.alert('Ошибка', 'Выберите раздел');
+    if (!selectedPlacement) {
+      Alert.alert('Ошибка', 'Выберите размещение');
       return;
     }
 
     try {
       setLoading(true);
+
+      // Remove from old container if needed
+      if (item?.parentId && item.parentId !== selectedPlacement.id) {
+        await storageService.removeItemFromContainer(item.parentId, itemId);
+      }
 
       const updatedItem = await storageService.updateItem(itemId, {
         name: name.trim(),
@@ -179,10 +200,16 @@ export default function EditItemScreen() {
         price: parseFloat(price) || 0,
         weight: parseFloat(weight) || 0,
         quantity: parseInt(quantity) || 1,
-        sectionId: selectedSectionId,
+        parentId: selectedPlacement.type === 'section' ? undefined : selectedPlacement.id,
+        sectionId: selectedPlacement.type === 'section' ? selectedPlacement.id : selectedPlacement.sectionId,
         condition: selectedCondition,
         tags,
       });
+
+      // Add to new container if needed
+      if (selectedPlacement.type !== 'section' && selectedPlacement.id !== item?.parentId) {
+        await storageService.addItemToContainer(selectedPlacement.id, itemId);
+      }
 
       if (updatedItem) {
         Alert.alert('Успешно', 'Предмет обновлен', [
@@ -270,29 +297,38 @@ export default function EditItemScreen() {
             />
           </View>
 
-          {/* Section */}
+          {/* Placement */}
           <View style={commonStyles.inputGroup}>
-            <Text style={commonStyles.label}>Раздел *</Text>
-            <View style={styles.sectionSelector}>
-              {sections.map((section) => (
-                <Pressable
-                  key={section.id}
-                  style={[
-                    styles.sectionOption,
-                    selectedSectionId === section.id && styles.sectionOptionSelected
-                  ]}
-                  onPress={() => setSelectedSectionId(section.id)}
-                >
-                  <Text style={styles.sectionEmoji}>{section.emoji}</Text>
-                  <Text style={[
-                    styles.sectionText,
-                    selectedSectionId === section.id && styles.sectionTextSelected
-                  ]}>
-                    {section.name}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
+            <Text style={commonStyles.label}>Размещение *</Text>
+            <Pressable
+              style={styles.placementSelector}
+              onPress={() => setShowPlacementMenu(true)}
+            >
+              {selectedPlacement ? (
+                <View style={styles.selectedPlacement}>
+                  <IconSymbol 
+                    name={selectedPlacement.type === 'section' ? "folder.fill" : "cube.box.fill"} 
+                    size={20} 
+                    color={selectedPlacement.type === 'section' ? (selectedPlacement.color || colors.primary) : colors.textSecondary} 
+                  />
+                  <View style={styles.placementInfo}>
+                    <Text style={styles.placementName} numberOfLines={1}>
+                      {selectedPlacement.type === 'section' && selectedPlacement.emoji} {selectedPlacement.name}
+                    </Text>
+                    <Text style={styles.placementType}>
+                      {selectedPlacement.type === 'section' ? 'Раздел' : 'Контейнер'}
+                    </Text>
+                  </View>
+                  <IconSymbol name="chevron.right" size={16} color={colors.textSecondary} />
+                </View>
+              ) : (
+                <View style={styles.placementPlaceholder}>
+                  <IconSymbol name="folder" size={20} color={colors.textSecondary} />
+                  <Text style={styles.placementPlaceholderText}>Выберите размещение</Text>
+                  <IconSymbol name="chevron.right" size={16} color={colors.textSecondary} />
+                </View>
+              )}
+            </Pressable>
           </View>
 
           {/* Price and Weight */}
@@ -392,6 +428,18 @@ export default function EditItemScreen() {
 
         <View style={{ height: 100 }} />
       </ScrollView>
+
+      {/* Tree Placement Menu */}
+      <TreePlacementMenu
+        visible={showPlacementMenu}
+        onClose={() => setShowPlacementMenu(false)}
+        onSelect={handlePlacementSelect}
+        items={allItems}
+        selectedItemId={selectedPlacement?.id}
+        excludeItemId={itemId} // Exclude current item from placement options
+        title="Выберите размещение"
+        maxLevels={20}
+      />
     </>
   );
 }
@@ -422,37 +470,47 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: 4,
   },
-  sectionSelector: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+  placementSelector: {
+    marginTop: 8,
   },
-  sectionOption: {
+  selectedPlacement: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    marginRight: 8,
-    marginBottom: 8,
-    borderRadius: 20,
     backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  sectionOptionSelected: {
-    backgroundColor: colors.primaryLight,
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 2,
     borderColor: colors.primary,
   },
-  sectionEmoji: {
+  placementPlaceholder: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.card,
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 2,
+    borderColor: colors.border,
+    borderStyle: 'dashed',
+  },
+  placementInfo: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  placementName: {
     fontSize: 16,
-    marginRight: 6,
-  },
-  sectionText: {
-    fontSize: 14,
-    color: colors.text,
-  },
-  sectionTextSelected: {
-    color: colors.primary,
     fontWeight: '600',
+    color: colors.text,
+    marginBottom: 2,
+  },
+  placementType: {
+    fontSize: 12,
+    color: colors.textSecondary,
+  },
+  placementPlaceholderText: {
+    fontSize: 16,
+    color: colors.textSecondary,
+    marginLeft: 12,
+    flex: 1,
   },
   row: {
     flexDirection: 'row',

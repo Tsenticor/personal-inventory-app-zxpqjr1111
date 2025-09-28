@@ -12,17 +12,20 @@ import {
 } from 'react-native';
 import { Stack, router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { IconSymbol } from '@/components/IconSymbol';
+import { TreePlacementMenu } from '@/components/TreePlacementMenu';
 import { commonStyles, colors } from '@/styles/commonStyles';
 import { storageService } from '@/services/storageService';
-import { Section, CreateInventoryItemData } from '@/types/inventory';
+import { InventoryItem, CreateInventoryItemData } from '@/types/inventory';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 
 export default function AddItemScreen() {
   const params = useLocalSearchParams();
-  const sectionId = params.sectionId as string;
+  const parentId = params.parentId as string;
 
-  const [sections, setSections] = useState<Section[]>([]);
+  const [allItems, setAllItems] = useState<InventoryItem[]>([]);
+  const [selectedPlacement, setSelectedPlacement] = useState<InventoryItem | null>(null);
+  const [showPlacementMenu, setShowPlacementMenu] = useState(false);
   const [formData, setFormData] = useState<CreateInventoryItemData>({
     name: '',
     description: '',
@@ -32,9 +35,9 @@ export default function AddItemScreen() {
     weight: 0,
     locationPath: [],
     quantity: 1,
-    parentId: undefined,
+    parentId: parentId || undefined,
     childrenIds: [],
-    sectionId: sectionId || '',
+    sectionId: '',
     isOnLoan: false,
     tags: [],
     condition: 'good',
@@ -44,16 +47,41 @@ export default function AddItemScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      loadSections();
+      loadData();
     }, [])
   );
 
-  const loadSections = async () => {
+  const loadData = async () => {
     try {
-      const sectionsData = await storageService.getSections();
-      setSections(sectionsData.filter(s => !s.isArchived));
+      const itemsData = await storageService.getItems();
+      setAllItems(itemsData.filter(item => !item.isArchived));
+      
+      // Set initial placement if parentId is provided
+      if (parentId) {
+        const parentItem = itemsData.find(item => item.id === parentId);
+        if (parentItem) {
+          setSelectedPlacement(parentItem);
+          setFormData(prev => ({
+            ...prev,
+            parentId: parentItem.type === 'section' ? undefined : parentId,
+            sectionId: parentItem.type === 'section' ? parentId : parentItem.sectionId,
+          }));
+        }
+      }
     } catch (error) {
-      console.log('Error loading sections:', error);
+      console.log('Error loading data:', error);
+    }
+  };
+
+  const handlePlacementSelect = (itemId: string) => {
+    const selectedItem = allItems.find(item => item.id === itemId);
+    if (selectedItem) {
+      setSelectedPlacement(selectedItem);
+      setFormData(prev => ({
+        ...prev,
+        parentId: selectedItem.type === 'section' ? undefined : itemId,
+        sectionId: selectedItem.type === 'section' ? itemId : selectedItem.sectionId,
+      }));
     }
   };
 
@@ -134,18 +162,24 @@ export default function AddItemScreen() {
       return;
     }
 
-    if (!formData.sectionId) {
-      Alert.alert('Ошибка', 'Выберите раздел');
+    if (!selectedPlacement) {
+      Alert.alert('Ошибка', 'Выберите размещение для предмета');
       return;
     }
 
     setLoading(true);
     try {
-      await storageService.saveItem({
+      const newItem = await storageService.saveItem({
         ...formData,
         type: 'item',
         containedItems: [],
       });
+
+      // If placing inside another item, add to its contained items
+      if (formData.parentId) {
+        await storageService.addItemToContainer(formData.parentId, newItem.id);
+      }
+
       Alert.alert('Успешно', 'Предмет добавлен', [
         { text: 'OK', onPress: () => router.back() }
       ]);
@@ -222,27 +256,36 @@ export default function AddItemScreen() {
           </View>
 
           <View style={commonStyles.inputGroup}>
-            <Text style={commonStyles.label}>Раздел *</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.sectionSelector}>
-              {sections.map((section) => (
-                <Pressable
-                  key={section.id}
-                  style={[
-                    styles.sectionOption,
-                    formData.sectionId === section.id && styles.sectionOptionSelected
-                  ]}
-                  onPress={() => setFormData(prev => ({ ...prev, sectionId: section.id }))}
-                >
-                  <Text style={styles.sectionEmoji}>{section.emoji}</Text>
-                  <Text style={[
-                    styles.sectionName,
-                    formData.sectionId === section.id && styles.sectionNameSelected
-                  ]}>
-                    {section.name}
-                  </Text>
-                </Pressable>
-              ))}
-            </ScrollView>
+            <Text style={commonStyles.label}>Размещение *</Text>
+            <Pressable
+              style={styles.placementSelector}
+              onPress={() => setShowPlacementMenu(true)}
+            >
+              {selectedPlacement ? (
+                <View style={styles.selectedPlacement}>
+                  <IconSymbol 
+                    name={selectedPlacement.type === 'section' ? "folder.fill" : "cube.box.fill"} 
+                    size={20} 
+                    color={selectedPlacement.type === 'section' ? (selectedPlacement.color || colors.primary) : colors.textSecondary} 
+                  />
+                  <View style={styles.placementInfo}>
+                    <Text style={styles.placementName} numberOfLines={1}>
+                      {selectedPlacement.type === 'section' && selectedPlacement.emoji} {selectedPlacement.name}
+                    </Text>
+                    <Text style={styles.placementType}>
+                      {selectedPlacement.type === 'section' ? 'Раздел' : 'Контейнер'}
+                    </Text>
+                  </View>
+                  <IconSymbol name="chevron.right" size={16} color={colors.textSecondary} />
+                </View>
+              ) : (
+                <View style={styles.placementPlaceholder}>
+                  <IconSymbol name="folder" size={20} color={colors.textSecondary} />
+                  <Text style={styles.placementPlaceholderText}>Выберите размещение</Text>
+                  <IconSymbol name="chevron.right" size={16} color={colors.textSecondary} />
+                </View>
+              )}
+            </Pressable>
           </View>
         </View>
 
@@ -366,6 +409,17 @@ export default function AddItemScreen() {
 
         <View style={{ height: 100 }} />
       </ScrollView>
+
+      {/* Tree Placement Menu */}
+      <TreePlacementMenu
+        visible={showPlacementMenu}
+        onClose={() => setShowPlacementMenu(false)}
+        onSelect={handlePlacementSelect}
+        items={allItems}
+        selectedItemId={selectedPlacement?.id}
+        title="Выберите размещение"
+        maxLevels={20}
+      />
     </>
   );
 }
@@ -375,35 +429,47 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  sectionSelector: {
+  placementSelector: {
     marginTop: 8,
   },
-  sectionOption: {
+  selectedPlacement: {
+    flexDirection: 'row',
     alignItems: 'center',
-    padding: 12,
-    marginRight: 12,
-    borderRadius: 12,
     backgroundColor: colors.card,
+    borderRadius: 12,
+    padding: 16,
     borderWidth: 2,
-    borderColor: 'transparent',
-    minWidth: 80,
-  },
-  sectionOptionSelected: {
     borderColor: colors.primary,
-    backgroundColor: colors.primaryLight,
   },
-  sectionEmoji: {
-    fontSize: 24,
-    marginBottom: 4,
+  placementPlaceholder: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.card,
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 2,
+    borderColor: colors.border,
+    borderStyle: 'dashed',
   },
-  sectionName: {
-    fontSize: 12,
-    color: colors.text,
-    textAlign: 'center',
+  placementInfo: {
+    flex: 1,
+    marginLeft: 12,
   },
-  sectionNameSelected: {
-    color: colors.primary,
+  placementName: {
+    fontSize: 16,
     fontWeight: '600',
+    color: colors.text,
+    marginBottom: 2,
+  },
+  placementType: {
+    fontSize: 12,
+    color: colors.textSecondary,
+  },
+  placementPlaceholderText: {
+    fontSize: 16,
+    color: colors.textSecondary,
+    marginLeft: 12,
+    flex: 1,
   },
   photoContainer: {
     position: 'relative',
