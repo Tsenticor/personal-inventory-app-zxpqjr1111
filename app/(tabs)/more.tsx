@@ -62,8 +62,7 @@ export default function MoreScreen() {
       subtitle: 'Просмотр журнала изменений',
       icon: 'clock.fill',
       onPress: () => {
-        // TODO: Navigate to events history
-        Alert.alert('В разработке', 'Функция будет добавлена в следующих версиях');
+        router.push('/events');
       },
     },
     {
@@ -130,6 +129,9 @@ export default function MoreScreen() {
       case 'deleted': return '🗑️';
       case 'loaned': return '📤';
       case 'returned': return '📥';
+      case 'archived': return '📁';
+      case 'restored': return '♻️';
+      case 'copied': return '📋';
       default: return '📋';
     }
   };
@@ -189,18 +191,34 @@ export default function MoreScreen() {
       {/* Recent Events */}
       {recentEvents.length > 0 && (
         <View style={[commonStyles.card, { marginHorizontal: 16, marginBottom: 16 }]}>
-          <Text style={[commonStyles.subtitle, { marginBottom: 16 }]}>
-            🕒 Последние события
-          </Text>
+          <View style={{
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: 16,
+          }}>
+            <Text style={commonStyles.subtitle}>
+              🕒 Последние события
+            </Text>
+            <Pressable onPress={() => router.push('/events')}>
+              <Text style={[commonStyles.text, { color: colors.primary, fontSize: 14 }]}>
+                Все события
+              </Text>
+            </Pressable>
+          </View>
           
-          {recentEvents.map((event) => (
-            <View key={event.id} style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              paddingVertical: 8,
-              borderBottomWidth: 1,
-              borderBottomColor: colors.border,
-            }}>
+          {recentEvents.map((event, index) => (
+            <Pressable
+              key={event.id}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                paddingVertical: 8,
+                borderBottomWidth: index < recentEvents.length - 1 ? 1 : 0,
+                borderBottomColor: colors.border,
+              }}
+              onPress={() => router.push('/events')}
+            >
               <Text style={{ fontSize: 16, marginRight: 12 }}>
                 {getEventIcon(event.type)}
               </Text>
@@ -212,7 +230,8 @@ export default function MoreScreen() {
                   {formatEventTime(event.timestamp)}
                 </Text>
               </View>
-            </View>
+              <IconSymbol name="chevron.right" size={12} color={colors.textSecondary} />
+            </Pressable>
           ))}
         </View>
       )}

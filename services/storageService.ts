@@ -91,7 +91,13 @@ class StorageService {
         type: 'created',
         itemId: newItem.id,
         itemName: newItem.name,
-        description: `Item "${newItem.name}" was created`,
+        description: `Создан предмет "${newItem.name}" в разделе`,
+        metadata: {
+          sectionId: newItem.sectionId,
+          price: newItem.price,
+          quantity: newItem.quantity,
+          serialNumber: newItem.serialNumber,
+        },
       });
       
       return newItem;
@@ -123,15 +129,74 @@ class StorageService {
       // Track location changes
       if (updates.locationPath && JSON.stringify(oldItem.locationPath) !== JSON.stringify(updates.locationPath)) {
         await this.logLocationChange(id, oldItem.locationPath, updates.locationPath);
+        await this.logEvent({
+          type: 'moved',
+          itemId: updatedItem.id,
+          itemName: updatedItem.name,
+          description: `Предмет "${updatedItem.name}" перемещён`,
+          fromLocation: oldItem.locationPath.join(' → '),
+          toLocation: updates.locationPath.join(' → '),
+          metadata: {
+            fromPath: oldItem.locationPath,
+            toPath: updates.locationPath,
+          },
+        });
       }
-      
-      // Log the event
-      await this.logEvent({
-        type: 'updated',
-        itemId: updatedItem.id,
-        itemName: updatedItem.name,
-        description: `Item "${updatedItem.name}" was updated`,
-      });
+
+      // Track loan status changes
+      if (updates.isOnLoan !== undefined && updates.isOnLoan !== oldItem.isOnLoan) {
+        if (updates.isOnLoan) {
+          await this.logEvent({
+            type: 'loaned',
+            itemId: updatedItem.id,
+            itemName: updatedItem.name,
+            description: `Предмет "${updatedItem.name}" выдан`,
+            metadata: {
+              loanedTo: updates.loanedTo,
+              loanedAt: updates.loanedAt,
+            },
+          });
+        } else {
+          await this.logEvent({
+            type: 'returned',
+            itemId: updatedItem.id,
+            itemName: updatedItem.name,
+            description: `Предмет "${updatedItem.name}" возвращён`,
+            metadata: {
+              wasLoanedTo: oldItem.loanedTo,
+              loanDuration: oldItem.loanedAt ? 
+                Math.floor((new Date().getTime() - oldItem.loanedAt.getTime()) / (1000 * 60 * 60 * 24)) : 0,
+            },
+          });
+        }
+      }
+
+      // Track other significant changes
+      const significantChanges: Record<string, any> = {};
+      if (updates.name && updates.name !== oldItem.name) {
+        significantChanges.name = { from: oldItem.name, to: updates.name };
+      }
+      if (updates.price !== undefined && updates.price !== oldItem.price) {
+        significantChanges.price = { from: oldItem.price, to: updates.price };
+      }
+      if (updates.quantity !== undefined && updates.quantity !== oldItem.quantity) {
+        significantChanges.quantity = { from: oldItem.quantity, to: updates.quantity };
+      }
+      if (updates.condition && updates.condition !== oldItem.condition) {
+        significantChanges.condition = { from: oldItem.condition, to: updates.condition };
+      }
+
+      if (Object.keys(significantChanges).length > 0) {
+        await this.logEvent({
+          type: 'updated',
+          itemId: updatedItem.id,
+          itemName: updatedItem.name,
+          description: `Предмет "${updatedItem.name}" изменён`,
+          metadata: {
+            changes: significantChanges,
+          },
+        });
+      }
       
       return updatedItem;
     } catch (error) {
@@ -157,7 +222,13 @@ class StorageService {
         type: 'deleted',
         itemId: item.id,
         itemName: item.name,
-        description: `Item "${item.name}" was deleted`,
+        description: `Предмет "${item.name}" удалён`,
+        metadata: {
+          serialNumber: item.serialNumber,
+          price: item.price,
+          quantity: item.quantity,
+          sectionId: item.sectionId,
+        },
       });
       
       return true;
@@ -175,7 +246,10 @@ class StorageService {
           type: 'archived',
           itemId: result.id,
           itemName: result.name,
-          description: `Item "${result.name}" was archived`,
+          description: `Предмет "${result.name}" архивирован`,
+          metadata: {
+            archivedAt: new Date(),
+          },
         });
       }
       return !!result;
@@ -193,13 +267,55 @@ class StorageService {
           type: 'restored',
           itemId: result.id,
           itemName: result.name,
-          description: `Item "${result.name}" was restored`,
+          description: `Предмет "${result.name}" восстановлен из архива`,
+          metadata: {
+            restoredAt: new Date(),
+          },
         });
       }
       return !!result;
     } catch (error) {
       console.log('Error restoring item:', error);
       return false;
+    }
+  }
+
+  async copyItem(id: string, newSectionId?: string): Promise<InventoryItem | null> {
+    try {
+      const items = await this.getItems();
+      const originalItem = items.find(item => item.id === id);
+      
+      if (!originalItem) {
+        return null;
+      }
+
+      const copiedItem = await this.saveItem({
+        ...originalItem,
+        name: `${originalItem.name} (копия)`,
+        sectionId: newSectionId || originalItem.sectionId,
+        parentId: undefined,
+        childrenIds: [],
+        isOnLoan: false,
+        loanedTo: undefined,
+        loanedAt: undefined,
+      });
+
+      await this.logEvent({
+        type: 'copied',
+        itemId: copiedItem.id,
+        itemName: copiedItem.name,
+        description: `Создана копия предмета "${originalItem.name}"`,
+        metadata: {
+          originalItemId: originalItem.id,
+          originalItemName: originalItem.name,
+          copiedToSection: newSectionId,
+        },
+      });
+
+      return copiedItem;
+    } catch (error) {
+      console.log('Error copying item:', error);
+      return null;
     }
   }
 
@@ -311,6 +427,48 @@ class StorageService {
       })) : [];
     } catch (error) {
       console.log('Error getting events:', error);
+      return [];
+    }
+  }
+
+  async clearEvents(): Promise<void> {
+    try {
+      await AsyncStorage.setItem(STORAGE_KEYS.EVENTS, JSON.stringify([]));
+      console.log('Events cleared successfully');
+    } catch (error) {
+      console.log('Error clearing events:', error);
+      throw error;
+    }
+  }
+
+  async getEventsByItem(itemId: string): Promise<EventLog[]> {
+    try {
+      const events = await this.getEvents();
+      return events.filter(event => event.itemId === itemId);
+    } catch (error) {
+      console.log('Error getting events by item:', error);
+      return [];
+    }
+  }
+
+  async getEventsByType(type: EventLog['type']): Promise<EventLog[]> {
+    try {
+      const events = await this.getEvents();
+      return events.filter(event => event.type === type);
+    } catch (error) {
+      console.log('Error getting events by type:', error);
+      return [];
+    }
+  }
+
+  async getEventsInDateRange(startDate: Date, endDate: Date): Promise<EventLog[]> {
+    try {
+      const events = await this.getEvents();
+      return events.filter(event => 
+        event.timestamp >= startDate && event.timestamp <= endDate
+      );
+    } catch (error) {
+      console.log('Error getting events in date range:', error);
       return [];
     }
   }
