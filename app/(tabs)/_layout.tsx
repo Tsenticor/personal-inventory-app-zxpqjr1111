@@ -35,7 +35,7 @@ export default function TabLayout() {
         options={{
           title: 'Инвентарь',
           tabBarIcon: ({ color, focused }) => (
-            <IconSymbol size={24} name="house.fill" color={color} />
+            <IconSymbol size={24} name={focused ? "house.fill" : "house"} color={color} />
           ),
         }}
       />
@@ -44,7 +44,7 @@ export default function TabLayout() {
         options={{
           title: 'Разделы',
           tabBarIcon: ({ color, focused }) => (
-            <IconSymbol size={24} name="folder.fill" color={color} />
+            <IconSymbol size={24} name={focused ? "folder.fill" : "folder"} color={color} />
           ),
         }}
       />
@@ -53,7 +53,7 @@ export default function TabLayout() {
         options={{
           title: 'Поиск',
           tabBarIcon: ({ color, focused }) => (
-            <IconSymbol size={24} name="magnifyingglass" color={color} />
+            <IconSymbol size={24} name={focused ? "magnifyingglass.circle.fill" : "magnifyingglass"} color={color} />
           ),
         }}
       />
@@ -62,7 +62,7 @@ export default function TabLayout() {
         options={{
           title: 'Выдача',
           tabBarIcon: ({ color, focused }) => (
-            <IconSymbol size={24} name="arrow.up.right.square.fill" color={color} />
+            <IconSymbol size={24} name={focused ? "arrow.up.right.square.fill" : "arrow.up.right.square"} color={color} />
           ),
         }}
       />
@@ -71,7 +71,7 @@ export default function TabLayout() {
         options={{
           title: 'Ещё',
           tabBarIcon: ({ color, focused }) => (
-            <IconSymbol size={24} name="ellipsis.circle.fill" color={color} />
+            <IconSymbol size={24} name={focused ? "ellipsis.circle.fill" : "ellipsis.circle"} color={color} />
           ),
         }}
       />

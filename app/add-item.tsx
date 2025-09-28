@@ -141,7 +141,11 @@ export default function AddItemScreen() {
 
     setLoading(true);
     try {
-      await storageService.saveItem(formData);
+      await storageService.saveItem({
+        ...formData,
+        type: 'item',
+        containedItems: [],
+      });
       Alert.alert('Успешно', 'Предмет добавлен', [
         { text: 'OK', onPress: () => router.back() }
       ]);

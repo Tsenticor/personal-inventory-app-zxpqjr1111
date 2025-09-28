@@ -4,6 +4,7 @@ import { InventoryItem, Section } from '@/types/inventory';
 import { storageService } from '@/services/storageService';
 import { router, useFocusEffect } from 'expo-router';
 import { IconSymbol } from '@/components/IconSymbol';
+import { ContextMenu } from '@/components/ContextMenu';
 import {
   View,
   Text,
@@ -22,6 +23,8 @@ export default function InventoryScreen() {
   const [selectedSectionId, setSelectedSectionId] = useState<string>('all');
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [showContextMenu, setShowContextMenu] = useState(false);
+  const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -106,6 +109,47 @@ export default function InventoryScreen() {
     </View>
   );
 
+  const handleLongPress = (item: InventoryItem) => {
+    setSelectedItem(item);
+    setShowContextMenu(true);
+  };
+
+  const handleContextAction = (actionId: string) => {
+    if (!selectedItem) return;
+
+    switch (actionId) {
+      case 'view':
+        router.push(`/item-detail?id=${selectedItem.id}`);
+        break;
+      case 'edit':
+        router.push(`/edit-item?id=${selectedItem.id}`);
+        break;
+      case 'delete':
+        Alert.alert(
+          'Удалить предмет',
+          `Вы уверены, что хотите удалить "${selectedItem.name}"?`,
+          [
+            { text: 'Отмена', style: 'cancel' },
+            {
+              text: 'Удалить',
+              style: 'destructive',
+              onPress: async () => {
+                try {
+                  await storageService.deleteItem(selectedItem.id);
+                  loadData();
+                  Alert.alert('Успешно', 'Предмет удален');
+                } catch (error) {
+                  console.log('Error deleting item:', error);
+                  Alert.alert('Ошибка', 'Не удалось удалить предмет');
+                }
+              },
+            },
+          ]
+        );
+        break;
+    }
+  };
+
   const renderItem = ({ item }: { item: InventoryItem }) => {
     const section = sections.find(s => s.id === item.sectionId);
     
@@ -113,6 +157,7 @@ export default function InventoryScreen() {
       <Pressable
         style={styles.itemCard}
         onPress={() => router.push(`/item-detail?id=${item.id}`)}
+        onLongPress={() => handleLongPress(item)}
       >
         <View style={styles.itemHeader}>
           {item.photo ? (
@@ -261,6 +306,36 @@ export default function InventoryScreen() {
       >
         <IconSymbol name="plus" size={24} color={colors.white} />
       </Pressable>
+
+      {/* Context Menu */}
+      <ContextMenu
+        visible={showContextMenu}
+        onClose={() => setShowContextMenu(false)}
+        options={{
+          title: selectedItem?.name,
+          actions: [
+            {
+              id: 'view',
+              title: 'Просмотреть',
+              icon: 'eye.fill',
+              color: colors.primary,
+            },
+            {
+              id: 'edit',
+              title: 'Редактировать',
+              icon: 'pencil',
+              color: colors.info,
+            },
+            {
+              id: 'delete',
+              title: 'Удалить',
+              icon: 'trash.fill',
+              destructive: true,
+            },
+          ]
+        }}
+        onAction={handleContextAction}
+      />
     </View>
   );
 }

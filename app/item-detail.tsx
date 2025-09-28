@@ -14,7 +14,10 @@ import { Stack, router, useLocalSearchParams, useFocusEffect } from 'expo-router
 import { IconSymbol } from '@/components/IconSymbol';
 import { commonStyles, colors } from '@/styles/commonStyles';
 import { storageService } from '@/services/storageService';
+import { searchService } from '@/services/searchService';
 import { InventoryItem, Section, EventLog } from '@/types/inventory';
+import { QuantitySelector } from '@/components/QuantitySelector';
+import { ContextMenu } from '@/components/ContextMenu';
 
 export default function ItemDetailScreen() {
   const params = useLocalSearchParams();
@@ -23,7 +26,11 @@ export default function ItemDetailScreen() {
   const [item, setItem] = useState<InventoryItem | null>(null);
   const [section, setSection] = useState<Section | null>(null);
   const [events, setEvents] = useState<EventLog[]>([]);
+  const [sections, setSections] = useState<Section[]>([]);
+  const [containedItems, setContainedItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showQuantitySelector, setShowQuantitySelector] = useState(false);
+  const [showMoveMenu, setShowMoveMenu] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -48,14 +55,21 @@ export default function ItemDetailScreen() {
 
       setItem(foundItem);
 
-      // Load section
-      const sections = await storageService.getSections();
-      const itemSection = sections.find(s => s.id === foundItem.sectionId);
+      // Load sections
+      const sectionsData = await storageService.getSections();
+      setSections(sectionsData);
+      const itemSection = sectionsData.find(s => s.id === foundItem.sectionId);
       setSection(itemSection || null);
 
       // Load events for this item
       const itemEvents = await storageService.getEventsByItem(itemId);
       setEvents(itemEvents);
+
+      // Load contained items if this is a container
+      if (foundItem.containedItems && foundItem.containedItems.length > 0) {
+        const contained = await storageService.getContainedItems(itemId);
+        setContainedItems(contained);
+      }
     } catch (error) {
       console.log('Error loading item data:', error);
       Alert.alert('Ошибка', 'Не удалось загрузить данные предмета');
@@ -94,24 +108,103 @@ export default function ItemDetailScreen() {
   const handleToggleLoan = async () => {
     if (!item) return;
 
-    try {
-      const updatedItem = await storageService.updateItem(itemId, {
-        isOnLoan: !item.isOnLoan,
-        loanedAt: !item.isOnLoan ? new Date() : undefined,
-        loanedTo: !item.isOnLoan ? 'Неизвестно' : undefined,
-      });
-
-      if (updatedItem) {
-        setItem(updatedItem);
-        Alert.alert(
-          'Успешно',
-          updatedItem.isOnLoan ? 'Предмет выдан' : 'Предмет возвращён'
+    if (item.isOnLoan) {
+      // Return item
+      try {
+        const success = await storageService.returnLoanedItem(itemId);
+        if (success) {
+          loadItemData();
+          Alert.alert('Успешно', 'Предмет возвращён');
+        } else {
+          Alert.alert('Ошибка', 'Не удалось вернуть предмет');
+        }
+      } catch (error) {
+        console.log('Error returning item:', error);
+        Alert.alert('Ошибка', 'Не удалось вернуть предмет');
+      }
+    } else {
+      // Loan item - show quantity selector if quantity > 1
+      if (item.quantity > 1) {
+        setShowQuantitySelector(true);
+      } else {
+        // Simple loan for single item
+        Alert.prompt(
+          'Выдача предмета',
+          'Кому выдается предмет?',
+          [
+            { text: 'Отмена', style: 'cancel' },
+            {
+              text: 'Выдать',
+              onPress: async (loanedTo) => {
+                if (!loanedTo?.trim()) return;
+                
+                try {
+                  const success = await storageService.loanItemWithQuantity(itemId, 1, loanedTo.trim());
+                  if (success) {
+                    loadItemData();
+                    Alert.alert('Успешно', 'Предмет выдан');
+                  } else {
+                    Alert.alert('Ошибка', 'Не удалось выдать предмет');
+                  }
+                } catch (error) {
+                  console.log('Error loaning item:', error);
+                  Alert.alert('Ошибка', 'Не удалось выдать предмет');
+                }
+              }
+            }
+          ],
+          'plain-text'
         );
       }
-    } catch (error) {
-      console.log('Error toggling loan status:', error);
-      Alert.alert('Ошибка', 'Не удалось изменить статус выдачи');
     }
+  };
+
+  const handleQuantityLoan = async (quantity: number, loanedTo: string) => {
+    try {
+      const success = await storageService.loanItemWithQuantity(itemId, quantity, loanedTo);
+      if (success) {
+        loadItemData();
+        Alert.alert('Успешно', `Выдано ${quantity} из ${item?.quantity} предметов`);
+      } else {
+        Alert.alert('Ошибка', 'Не удалось выдать предмет');
+      }
+    } catch (error) {
+      console.log('Error loaning item with quantity:', error);
+      Alert.alert('Ошибка', 'Не удалось выдать предмет');
+    }
+  };
+
+  const handleMoveItem = (targetSectionId: string) => {
+    if (!item) return;
+
+    Alert.alert(
+      'Переместить предмет',
+      `Переместить "${item.name}" в выбранный раздел?`,
+      [
+        { text: 'Отмена', style: 'cancel' },
+        {
+          text: 'Переместить',
+          onPress: async () => {
+            try {
+              const targetSection = sections.find(s => s.id === targetSectionId);
+              const updatedItem = await storageService.updateItem(itemId, {
+                sectionId: targetSectionId,
+              });
+
+              if (updatedItem) {
+                loadItemData();
+                Alert.alert('Успешно', `Предмет перемещен в "${targetSection?.name}"`);
+              } else {
+                Alert.alert('Ошибка', 'Не удалось переместить предмет');
+              }
+            } catch (error) {
+              console.log('Error moving item:', error);
+              Alert.alert('Ошибка', 'Не удалось переместить предмет');
+            }
+          }
+        }
+      ]
+    );
   };
 
   const handleShare = async () => {
@@ -319,6 +412,39 @@ ${item.tags.length > 0 ? `\nТеги: ${item.tags.join(', ')}` : ''}
           </View>
         )}
 
+        {/* Contained Items */}
+        {containedItems.length > 0 && (
+          <View style={commonStyles.section}>
+            <Text style={commonStyles.sectionTitle}>Содержимое ({containedItems.length})</Text>
+            <View style={styles.containedItemsContainer}>
+              {containedItems.map((containedItem) => (
+                <Pressable
+                  key={containedItem.id}
+                  style={styles.containedItem}
+                  onPress={() => router.push(`/item-detail?id=${containedItem.id}`)}
+                >
+                  {containedItem.photo ? (
+                    <Image source={{ uri: containedItem.photo }} style={styles.containedItemImage} />
+                  ) : (
+                    <View style={[styles.containedItemImage, styles.containedItemImagePlaceholder]}>
+                      <IconSymbol name="cube.box.fill" size={16} color={colors.textSecondary} />
+                    </View>
+                  )}
+                  <View style={styles.containedItemInfo}>
+                    <Text style={styles.containedItemName} numberOfLines={1}>
+                      {containedItem.name}
+                    </Text>
+                    <Text style={styles.containedItemDetails}>
+                      Кол-во: {containedItem.quantity} • {containedItem.price}₽
+                    </Text>
+                  </View>
+                  <IconSymbol name="chevron.right" size={14} color={colors.textSecondary} />
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        )}
+
         {/* Actions */}
         <View style={commonStyles.section}>
           <Text style={commonStyles.sectionTitle}>Действия</Text>
@@ -334,6 +460,16 @@ ${item.tags.length > 0 ? `\nТеги: ${item.tags.join(', ')}` : ''}
             />
             <Text style={[commonStyles.buttonText, { color: colors.white, marginLeft: 8 }]}>
               {item.isOnLoan ? 'Вернуть предмет' : 'Выдать предмет'}
+            </Text>
+          </Pressable>
+
+          <Pressable
+            style={[commonStyles.button, { backgroundColor: colors.info, marginTop: 12 }]}
+            onPress={() => setShowMoveMenu(true)}
+          >
+            <IconSymbol name="arrow.right.circle.fill" size={20} color={colors.white} />
+            <Text style={[commonStyles.buttonText, { color: colors.white, marginLeft: 8 }]}>
+              Переместить предмет
             </Text>
           </Pressable>
 
@@ -386,6 +522,33 @@ ${item.tags.length > 0 ? `\nТеги: ${item.tags.join(', ')}` : ''}
 
         <View style={{ height: 100 }} />
       </ScrollView>
+
+      {/* Quantity Selector Modal */}
+      <QuantitySelector
+        visible={showQuantitySelector}
+        onClose={() => setShowQuantitySelector(false)}
+        onConfirm={handleQuantityLoan}
+        maxQuantity={searchService.getAvailableQuantity(item)}
+        itemName={item.name}
+      />
+
+      {/* Move Menu Modal */}
+      <ContextMenu
+        visible={showMoveMenu}
+        onClose={() => setShowMoveMenu(false)}
+        options={{
+          title: 'Переместить в раздел',
+          actions: sections
+            .filter(s => s.id !== item.sectionId)
+            .map(s => ({
+              id: s.id,
+              title: `${s.emoji} ${s.name}`,
+              icon: 'folder.fill',
+              color: s.color,
+            }))
+        }}
+        onAction={handleMoveItem}
+      />
     </>
   );
 }
@@ -576,6 +739,44 @@ const styles = StyleSheet.create({
   },
   emptyEventsText: {
     fontSize: 14,
+    color: colors.textSecondary,
+  },
+  containedItemsContainer: {
+    backgroundColor: colors.card,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  containedItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  containedItemImage: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    marginRight: 12,
+  },
+  containedItemImagePlaceholder: {
+    backgroundColor: colors.backgroundSecondary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  containedItemInfo: {
+    flex: 1,
+  },
+  containedItemName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: 2,
+  },
+  containedItemDetails: {
+    fontSize: 12,
     color: colors.textSecondary,
   },
 });

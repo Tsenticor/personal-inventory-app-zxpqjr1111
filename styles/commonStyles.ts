@@ -18,6 +18,7 @@ export const colors = {
   warningLight: '#FFF4E6',
   error: '#FF3B30',
   errorLight: '#FFEBEA',
+  destructive: '#FF3B30',
   info: '#5AC8FA',
   infoLight: '#E6F7FF',
   
@@ -178,5 +179,46 @@ export const commonStyles = StyleSheet.create({
   
   paddingVertical: {
     paddingVertical: 16,
+  },
+  
+  listItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: colors.card,
+    borderRadius: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  
+  fab: {
+    position: 'absolute',
+    bottom: 24,
+    right: 24,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 8,
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+  },
+  
+  title: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  
+  subtitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: colors.text,
   },
 });

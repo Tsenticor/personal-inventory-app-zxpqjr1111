@@ -7,17 +7,23 @@ import {
   Pressable,
   RefreshControl,
   Alert,
+  Image,
+  StyleSheet,
 } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { IconSymbol } from '@/components/IconSymbol';
 import { commonStyles, colors } from '@/styles/commonStyles';
 import { storageService } from '@/services/storageService';
+import { searchService } from '@/services/searchService';
 import { Section, InventoryItem } from '@/types/inventory';
+import { ContextMenu } from '@/components/ContextMenu';
 
 export default function SectionsScreen() {
   const [sections, setSections] = useState<Section[]>([]);
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showContextMenu, setShowContextMenu] = useState(false);
+  const [selectedSection, setSelectedSection] = useState<Section | null>(null);
 
   const loadData = async () => {
     try {
@@ -85,57 +91,98 @@ export default function SectionsScreen() {
     );
   };
 
+  const handleLongPress = (section: Section) => {
+    setSelectedSection(section);
+    setShowContextMenu(true);
+  };
+
+  const handleContextAction = (actionId: string) => {
+    if (!selectedSection) return;
+
+    switch (actionId) {
+      case 'edit':
+        router.push(`/add-section?id=${selectedSection.id}`);
+        break;
+      case 'delete':
+        handleDeleteSection(selectedSection);
+        break;
+      case 'view':
+        router.push({
+          pathname: '/search',
+          params: { sectionId: selectedSection.id }
+        });
+        break;
+    }
+  };
+
   const renderSection = ({ item: section }: { item: Section }) => {
     const itemCount = getItemCountForSection(section.id);
     const totalValue = getTotalValueForSection(section.id);
+    const sectionItems = searchService.getItemsBySection(items, section.id);
+    const recentItems = sectionItems.slice(0, 3);
 
     return (
       <Pressable
-        style={commonStyles.listItem}
+        style={styles.sectionCard}
         onPress={() => {
-          // Navigate to section items view
           router.push({
             pathname: '/search',
             params: { sectionId: section.id }
           });
         }}
+        onLongPress={() => handleLongPress(section)}
       >
-        <View style={{
-          width: 50,
-          height: 50,
-          borderRadius: 25,
-          backgroundColor: section.color,
-          justifyContent: 'center',
-          alignItems: 'center',
-          marginRight: 12,
-        }}>
-          <Text style={{ fontSize: 24 }}>{section.emoji}</Text>
-        </View>
-        
-        <View style={{ flex: 1 }}>
-          <Text style={[commonStyles.text, { fontWeight: '600', marginBottom: 4 }]}>
-            {section.name}
-          </Text>
-          <Text style={commonStyles.textSecondary}>
-            {itemCount} предметов • {totalValue.toLocaleString()}₽
-          </Text>
-          <Text style={[commonStyles.textSecondary, { fontSize: 12, marginTop: 2 }]}>
-            Вид: {section.viewType === 'list' ? 'Список' : section.viewType === 'grid' ? 'Сетка' : 'Карточки'}
-          </Text>
-        </View>
-        
-        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <Pressable
-            style={{
-              padding: 8,
-              marginRight: 8,
-            }}
-            onPress={() => handleDeleteSection(section)}
-          >
-            <IconSymbol name="trash" size={16} color={colors.destructive} />
-          </Pressable>
+        <View style={styles.sectionHeader}>
+          <View style={[styles.sectionIcon, { backgroundColor: section.color }]}>
+            <Text style={styles.sectionEmoji}>{section.emoji}</Text>
+          </View>
+          
+          <View style={styles.sectionInfo}>
+            <Text style={styles.sectionName}>{section.name}</Text>
+            <Text style={styles.sectionStats}>
+              {itemCount} предметов • {totalValue.toLocaleString()}₽
+            </Text>
+            <Text style={styles.sectionViewType}>
+              Вид: {section.viewType === 'list' ? 'Список' : section.viewType === 'grid' ? 'Сетка' : 'Карточки'}
+            </Text>
+          </View>
+          
           <IconSymbol name="chevron.right" size={16} color={colors.textSecondary} />
         </View>
+
+        {/* Recent Items Preview */}
+        {recentItems.length > 0 && (
+          <View style={styles.itemsPreview}>
+            <Text style={styles.itemsPreviewTitle}>Последние предметы:</Text>
+            <View style={styles.itemsPreviewGrid}>
+              {recentItems.map((item) => (
+                <View key={item.id} style={styles.previewItem}>
+                  {item.photo ? (
+                    <Image source={{ uri: item.photo }} style={styles.previewItemImage} />
+                  ) : (
+                    <View style={[styles.previewItemImage, styles.previewItemImagePlaceholder]}>
+                      <IconSymbol name="cube.box.fill" size={12} color={colors.textSecondary} />
+                    </View>
+                  )}
+                  <Text style={styles.previewItemName} numberOfLines={1}>
+                    {item.name}
+                  </Text>
+                </View>
+              ))}
+              {itemCount > 3 && (
+                <View style={styles.previewMore}>
+                  <Text style={styles.previewMoreText}>+{itemCount - 3}</Text>
+                </View>
+              )}
+            </View>
+          </View>
+        )}
+
+        {section.description && (
+          <Text style={styles.sectionDescription} numberOfLines={2}>
+            {section.description}
+          </Text>
+        )}
       </Pressable>
     );
   };
@@ -194,6 +241,140 @@ export default function SectionsScreen() {
       >
         <IconSymbol name="plus" size={24} color="white" />
       </Pressable>
+
+      {/* Context Menu */}
+      <ContextMenu
+        visible={showContextMenu}
+        onClose={() => setShowContextMenu(false)}
+        options={{
+          title: selectedSection?.name,
+          actions: [
+            {
+              id: 'view',
+              title: 'Просмотреть предметы',
+              icon: 'eye.fill',
+              color: colors.primary,
+            },
+            {
+              id: 'edit',
+              title: 'Редактировать',
+              icon: 'pencil',
+              color: colors.info,
+            },
+            {
+              id: 'delete',
+              title: 'Удалить',
+              icon: 'trash.fill',
+              destructive: true,
+            },
+          ]
+        }}
+        onAction={handleContextAction}
+      />
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  sectionCard: {
+    backgroundColor: colors.card,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  sectionIcon: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  sectionEmoji: {
+    fontSize: 24,
+  },
+  sectionInfo: {
+    flex: 1,
+  },
+  sectionName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: 4,
+  },
+  sectionStats: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    marginBottom: 2,
+  },
+  sectionViewType: {
+    fontSize: 12,
+    color: colors.textSecondary,
+  },
+  sectionDescription: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    lineHeight: 18,
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  itemsPreview: {
+    marginBottom: 8,
+  },
+  itemsPreviewTitle: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginBottom: 8,
+    fontWeight: '500',
+  },
+  itemsPreviewGrid: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  previewItem: {
+    alignItems: 'center',
+    marginRight: 12,
+    width: 50,
+  },
+  previewItemImage: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    marginBottom: 4,
+  },
+  previewItemImagePlaceholder: {
+    backgroundColor: colors.backgroundSecondary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  previewItemName: {
+    fontSize: 10,
+    color: colors.textSecondary,
+    textAlign: 'center',
+  },
+  previewMore: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    backgroundColor: colors.backgroundSecondary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderStyle: 'dashed',
+  },
+  previewMoreText: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    fontWeight: '600',
+  },
+});

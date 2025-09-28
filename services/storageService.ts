@@ -15,6 +15,7 @@ import {
   Statistics,
   LocationHistory
 } from '../types/inventory';
+import { colors } from '../styles/commonStyles';
 import uuid from 'react-native-uuid';
 
 const STORAGE_KEYS = {
@@ -81,6 +82,9 @@ class StorageService {
         tags: item.tags || [],
         condition: item.condition || 'good',
         isArchived: item.isArchived || false,
+        type: item.type || 'item',
+        childrenIds: item.childrenIds || [],
+        containedItems: item.containedItems || [],
       };
       
       items.push(newItem);
@@ -91,12 +95,15 @@ class StorageService {
         type: 'created',
         itemId: newItem.id,
         itemName: newItem.name,
-        description: `Создан предмет "${newItem.name}" в разделе`,
+        description: newItem.type === 'section' 
+          ? `Создан раздел "${newItem.name}"`
+          : `Создан предмет "${newItem.name}" в разделе`,
         metadata: {
           sectionId: newItem.sectionId,
           price: newItem.price,
           quantity: newItem.quantity,
           serialNumber: newItem.serialNumber,
+          type: newItem.type,
         },
       });
       
@@ -298,6 +305,8 @@ class StorageService {
         isOnLoan: false,
         loanedTo: undefined,
         loanedAt: undefined,
+        loanQuantity: undefined,
+        containedItems: [],
       });
 
       await this.logEvent({
@@ -319,40 +328,240 @@ class StorageService {
     }
   }
 
-  // Sections
+  // Nested items functionality
+  async addItemToContainer(containerId: string, itemId: string): Promise<boolean> {
+    try {
+      const items = await this.getItems();
+      const container = items.find(item => item.id === containerId);
+      const item = items.find(item => item.id === itemId);
+      
+      if (!container || !item) {
+        return false;
+      }
+
+      // Update container's contained items
+      const updatedContainer = await this.updateItem(containerId, {
+        containedItems: [...(container.containedItems || []), itemId],
+      });
+
+      // Update item's parent
+      const updatedItem = await this.updateItem(itemId, {
+        parentId: containerId,
+      });
+
+      if (updatedContainer && updatedItem) {
+        await this.logEvent({
+          type: 'moved',
+          itemId: itemId,
+          itemName: item.name,
+          description: `Предмет "${item.name}" помещен в "${container.name}"`,
+          metadata: {
+            containerId: containerId,
+            containerName: container.name,
+          },
+        });
+        return true;
+      }
+
+      return false;
+    } catch (error) {
+      console.log('Error adding item to container:', error);
+      return false;
+    }
+  }
+
+  async removeItemFromContainer(containerId: string, itemId: string): Promise<boolean> {
+    try {
+      const items = await this.getItems();
+      const container = items.find(item => item.id === containerId);
+      const item = items.find(item => item.id === itemId);
+      
+      if (!container || !item) {
+        return false;
+      }
+
+      // Update container's contained items
+      const updatedContainer = await this.updateItem(containerId, {
+        containedItems: (container.containedItems || []).filter(id => id !== itemId),
+      });
+
+      // Update item's parent
+      const updatedItem = await this.updateItem(itemId, {
+        parentId: undefined,
+      });
+
+      if (updatedContainer && updatedItem) {
+        await this.logEvent({
+          type: 'moved',
+          itemId: itemId,
+          itemName: item.name,
+          description: `Предмет "${item.name}" извлечен из "${container.name}"`,
+          metadata: {
+            containerId: containerId,
+            containerName: container.name,
+          },
+        });
+        return true;
+      }
+
+      return false;
+    } catch (error) {
+      console.log('Error removing item from container:', error);
+      return false;
+    }
+  }
+
+  async getContainedItems(containerId: string): Promise<InventoryItem[]> {
+    try {
+      const items = await this.getItems();
+      const container = items.find(item => item.id === containerId);
+      
+      if (!container || !container.containedItems) {
+        return [];
+      }
+
+      return items.filter(item => container.containedItems!.includes(item.id));
+    } catch (error) {
+      console.log('Error getting contained items:', error);
+      return [];
+    }
+  }
+
+  // Loan with quantity selection
+  async loanItemWithQuantity(itemId: string, quantity: number, loanedTo: string): Promise<boolean> {
+    try {
+      const items = await this.getItems();
+      const item = items.find(i => i.id === itemId);
+      
+      if (!item) {
+        return false;
+      }
+
+      if (quantity > item.quantity || quantity < 1) {
+        return false;
+      }
+
+      const updatedItem = await this.updateItem(itemId, {
+        isOnLoan: true,
+        loanedTo: loanedTo,
+        loanedAt: new Date(),
+        loanQuantity: quantity,
+      });
+
+      if (updatedItem) {
+        await this.logEvent({
+          type: 'loaned',
+          itemId: itemId,
+          itemName: item.name,
+          description: `Выдано ${quantity} из ${item.quantity} "${item.name}" пользователю ${loanedTo}`,
+          metadata: {
+            loanedTo: loanedTo,
+            loanedQuantity: quantity,
+            totalQuantity: item.quantity,
+            loanedAt: new Date(),
+          },
+        });
+        return true;
+      }
+
+      return false;
+    } catch (error) {
+      console.log('Error loaning item with quantity:', error);
+      return false;
+    }
+  }
+
+  async returnLoanedItem(itemId: string): Promise<boolean> {
+    try {
+      const items = await this.getItems();
+      const item = items.find(i => i.id === itemId);
+      
+      if (!item || !item.isOnLoan) {
+        return false;
+      }
+
+      const updatedItem = await this.updateItem(itemId, {
+        isOnLoan: false,
+        loanedTo: undefined,
+        loanedAt: undefined,
+        loanQuantity: undefined,
+      });
+
+      if (updatedItem) {
+        await this.logEvent({
+          type: 'returned',
+          itemId: itemId,
+          itemName: item.name,
+          description: `Возвращен предмет "${item.name}" от ${item.loanedTo}`,
+          metadata: {
+            wasLoanedTo: item.loanedTo,
+            loanedQuantity: item.loanQuantity,
+            loanDuration: item.loanedAt ? 
+              Math.floor((new Date().getTime() - item.loanedAt.getTime()) / (1000 * 60 * 60 * 24)) : 0,
+          },
+        });
+        return true;
+      }
+
+      return false;
+    } catch (error) {
+      console.log('Error returning loaned item:', error);
+      return false;
+    }
+  }
+
+  // Sections (now unified with items)
   async getSections(): Promise<Section[]> {
     try {
-      const sections = await AsyncStorage.getItem(STORAGE_KEYS.SECTIONS);
-      return sections ? JSON.parse(sections).map((section: any) => ({
-        ...section,
-        createdAt: new Date(section.createdAt),
-        updatedAt: new Date(section.updatedAt),
-        childSectionIds: section.childSectionIds || [],
-        isArchived: section.isArchived || false,
-        sortOrder: section.sortOrder || 0,
-      })) : [];
+      const items = await this.getItems();
+      return items
+        .filter(item => item.type === 'section')
+        .map(item => ({
+          ...item,
+          emoji: item.emoji || '📁',
+          color: item.color || colors.primary,
+          viewType: item.viewType || 'list',
+          sortOrder: item.sortOrder || 0,
+        })) as Section[];
     } catch (error) {
       console.log('Error getting sections:', error);
       return [];
     }
   }
 
-  async saveSection(section: Omit<Section, 'id' | 'createdAt' | 'updatedAt'>): Promise<Section> {
+  async saveSection(section: Omit<Section, 'id' | 'createdAt' | 'updatedAt' | 'serialNumber'>): Promise<Section> {
     try {
       const sections = await this.getSections();
-      const newSection: Section = {
-        ...section,
+      const newSectionItem: InventoryItem = {
         id: uuid.v4() as string,
+        serialNumber: await this.getNextSerialNumber(),
+        name: section.name,
+        description: section.description || '',
+        photo: section.photo,
+        video: section.video,
+        price: 0,
+        weight: 0,
+        locationPath: [],
+        quantity: 1,
+        parentId: section.parentSectionId,
+        childrenIds: section.childSectionIds || [],
+        sectionId: section.parentSectionId || 'root',
         createdAt: new Date(),
         updatedAt: new Date(),
-        childSectionIds: section.childSectionIds || [],
+        isOnLoan: false,
+        tags: section.tags || [],
+        condition: 'good',
         isArchived: section.isArchived || false,
+        type: 'section',
+        emoji: section.emoji,
+        color: section.color,
+        viewType: section.viewType,
         sortOrder: section.sortOrder || sections.length,
+        containedItems: [],
       };
       
-      sections.push(newSection);
-      await AsyncStorage.setItem(STORAGE_KEYS.SECTIONS, JSON.stringify(sections));
-      return newSection;
+      await this.saveItem(newSectionItem);
+      return newSectionItem as Section;
     } catch (error) {
       console.log('Error saving section:', error);
       throw error;
@@ -361,22 +570,8 @@ class StorageService {
 
   async updateSection(id: string, updates: Partial<Section>): Promise<Section | null> {
     try {
-      const sections = await this.getSections();
-      const sectionIndex = sections.findIndex(section => section.id === id);
-      
-      if (sectionIndex === -1) {
-        return null;
-      }
-      
-      const updatedSection = {
-        ...sections[sectionIndex],
-        ...updates,
-        updatedAt: new Date(),
-      };
-      
-      sections[sectionIndex] = updatedSection;
-      await AsyncStorage.setItem(STORAGE_KEYS.SECTIONS, JSON.stringify(sections));
-      return updatedSection;
+      const updatedItem = await this.updateItem(id, updates);
+      return updatedItem as Section | null;
     } catch (error) {
       console.log('Error updating section:', error);
       return null;
@@ -385,10 +580,7 @@ class StorageService {
 
   async deleteSection(id: string): Promise<boolean> {
     try {
-      const sections = await this.getSections();
-      const filteredSections = sections.filter(section => section.id !== id);
-      await AsyncStorage.setItem(STORAGE_KEYS.SECTIONS, JSON.stringify(filteredSections));
-      return true;
+      return await this.deleteItem(id);
     } catch (error) {
       console.log('Error deleting section:', error);
       return false;

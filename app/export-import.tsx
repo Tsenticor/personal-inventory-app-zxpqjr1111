@@ -38,9 +38,8 @@ export default function ExportImportScreen() {
   };
 
   const generateExportData = async (): Promise<ExportData> => {
-    const [items, sections, events, goals, notes, mindMaps, tables, reminders] = await Promise.all([
+    const [allItems, events, goals, notes, mindMaps, tables, reminders] = await Promise.all([
       storageService.getItems(),
-      storageService.getSections(),
       storageService.getEvents(),
       storageService.getGoals(),
       storageService.getNotes(),
@@ -49,8 +48,12 @@ export default function ExportImportScreen() {
       storageService.getReminders(),
     ]);
 
+    // Separate items and sections from unified data
+    const items = allItems.filter(item => item.type !== 'section');
+    const sections = allItems.filter(item => item.type === 'section') as Section[];
+
     const exportData: ExportData = {
-      version: '1.0.0',
+      version: '2.0.0', // Updated version for unified data structure
       exportDate: new Date(),
       items,
       sections,
@@ -61,8 +64,8 @@ export default function ExportImportScreen() {
       tables,
       reminders,
       metadata: {
-        appVersion: '1.0.0',
-        deviceInfo: 'React Native App',
+        appVersion: '2.0.0',
+        deviceInfo: 'React Native Inventory App',
         totalItems: items.length,
         totalSections: sections.length,
         isEncrypted: false,

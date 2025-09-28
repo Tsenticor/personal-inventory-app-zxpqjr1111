@@ -18,25 +18,27 @@ export interface InventoryItem {
   isOnLoan: boolean;
   loanedTo?: string;
   loanedAt?: Date;
+  loanQuantity?: number; // Количество предметов на выдаче (если quantity > 1)
   tags: string[];
   barcode?: string;
   purchaseDate?: Date;
   warrantyExpiry?: Date;
   condition: 'new' | 'excellent' | 'good' | 'fair' | 'poor';
   isArchived: boolean;
+  type: 'item' | 'section'; // Унифицированный тип данных
+  emoji?: string; // Для разделов
+  color?: string; // Для разделов
+  viewType?: 'list' | 'grid' | 'cards'; // Для разделов
+  sortOrder?: number; // Для разделов
+  containedItems?: string[]; // Предметы внутри этого предмета/раздела
 }
 
-export interface Section {
-  id: string;
-  name: string;
+// Оставляем Section для обратной совместимости, но теперь это алиас
+export type Section = InventoryItem & {
+  type: 'section';
   emoji: string;
   color: string;
   viewType: 'list' | 'grid' | 'cards';
-  createdAt: Date;
-  updatedAt: Date;
-  parentSectionId?: string;
-  childSectionIds: string[];
-  isArchived: boolean;
   sortOrder: number;
 }
 
@@ -109,6 +111,7 @@ export interface SearchFilters {
   sortBy: 'name' | 'createdAt' | 'price' | 'weight' | 'quantity' | 'serialNumber' | 'updatedAt';
   sortOrder: 'asc' | 'desc';
   includeArchived: boolean;
+  includeSections?: boolean; // Include sections in search results
 }
 
 export interface MindMapNode {
@@ -357,6 +360,28 @@ export interface ValidationResult {
   isValid: boolean;
   errors: ValidationError[];
   warnings: ValidationError[];
+}
+
+// Context menu for long press actions
+export interface ContextMenuAction {
+  id: string;
+  title: string;
+  icon: string;
+  color?: string;
+  destructive?: boolean;
+}
+
+export interface ContextMenuOptions {
+  title?: string;
+  actions: ContextMenuAction[];
+}
+
+// Quantity selection for loans
+export interface LoanQuantitySelection {
+  itemId: string;
+  availableQuantity: number;
+  selectedQuantity: number;
+  loanedTo: string;
 }
 
 // Utility types for form handling

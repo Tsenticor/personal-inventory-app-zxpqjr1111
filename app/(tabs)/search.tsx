@@ -7,6 +7,8 @@ import {
   FlatList,
   Pressable,
   Alert,
+  Image,
+  StyleSheet,
 } from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { IconSymbol } from '@/components/IconSymbol';
@@ -14,6 +16,7 @@ import { commonStyles, colors } from '@/styles/commonStyles';
 import { storageService } from '@/services/storageService';
 import { searchService } from '@/services/searchService';
 import { InventoryItem, Section, SearchFilters } from '@/types/inventory';
+import { ContextMenu } from '@/components/ContextMenu';
 
 export default function SearchScreen() {
   const params = useLocalSearchParams();
@@ -25,7 +28,10 @@ export default function SearchScreen() {
     sectionId: params.sectionId as string || undefined,
     sortBy: 'name',
     sortOrder: 'asc',
+    includeArchived: false,
   });
+  const [showContextMenu, setShowContextMenu] = useState(false);
+  const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
 
   const loadData = async () => {
     try {
@@ -95,54 +101,117 @@ export default function SearchScreen() {
     </View>
   );
 
+  const handleLongPress = (item: InventoryItem) => {
+    setSelectedItem(item);
+    setShowContextMenu(true);
+  };
+
+  const handleContextAction = (actionId: string) => {
+    if (!selectedItem) return;
+
+    switch (actionId) {
+      case 'view':
+        router.push(`/item-detail?id=${selectedItem.id}`);
+        break;
+      case 'edit':
+        router.push(`/edit-item?id=${selectedItem.id}`);
+        break;
+      case 'delete':
+        Alert.alert(
+          'Удалить предмет',
+          `Вы уверены, что хотите удалить "${selectedItem.name}"?`,
+          [
+            { text: 'Отмена', style: 'cancel' },
+            {
+              text: 'Удалить',
+              style: 'destructive',
+              onPress: async () => {
+                try {
+                  await storageService.deleteItem(selectedItem.id);
+                  loadData();
+                  Alert.alert('Успешно', 'Предмет удален');
+                } catch (error) {
+                  console.log('Error deleting item:', error);
+                  Alert.alert('Ошибка', 'Не удалось удалить предмет');
+                }
+              },
+            },
+          ]
+        );
+        break;
+      case 'loan':
+        // Handle loan logic here
+        break;
+    }
+  };
+
   const renderItem = ({ item }: { item: InventoryItem }) => {
     const section = sections.find(s => s.id === item.sectionId);
     
     return (
       <Pressable
-        style={commonStyles.listItem}
-        onPress={() => router.push(`/item/${item.id}`)}
+        style={styles.itemCard}
+        onPress={() => router.push(`/item-detail?id=${item.id}`)}
+        onLongPress={() => handleLongPress(item)}
       >
-        <View style={{
-          width: 50,
-          height: 50,
-          borderRadius: 25,
-          backgroundColor: section?.color || colors.grey,
-          justifyContent: 'center',
-          alignItems: 'center',
-          marginRight: 12,
-        }}>
-          <Text style={{ fontSize: 20 }}>{section?.emoji || '📦'}</Text>
-        </View>
-        
-        <View style={{ flex: 1 }}>
-          <Text style={[commonStyles.text, { fontWeight: '600', marginBottom: 4 }]}>
-            {item.name}
-          </Text>
-          <Text style={commonStyles.textSecondary} numberOfLines={1}>
-            {item.description}
-          </Text>
-          <Text style={[commonStyles.textSecondary, { fontSize: 12, marginTop: 2 }]}>
-            {section?.name} • №{item.serialNumber} • {item.quantity} шт. • {item.price}₽
-          </Text>
-        </View>
-        
-        <View style={{ alignItems: 'flex-end' }}>
-          {item.isOnLoan && (
-            <View style={{
-              backgroundColor: colors.destructive,
-              paddingHorizontal: 8,
-              paddingVertical: 4,
-              borderRadius: 12,
-              marginBottom: 4,
-            }}>
-              <Text style={{ color: 'white', fontSize: 10, fontWeight: '600' }}>
-                НА ВЫДАЧЕ
-              </Text>
+        <View style={styles.itemHeader}>
+          {item.photo ? (
+            <Image source={{ uri: item.photo }} style={styles.itemImage} />
+          ) : (
+            <View style={[styles.itemImage, styles.itemImagePlaceholder]}>
+              <IconSymbol name="cube.box.fill" size={20} color={colors.textSecondary} />
             </View>
           )}
-          <IconSymbol name="chevron.right" size={16} color={colors.textSecondary} />
+          
+          <View style={styles.itemInfo}>
+            <Text style={styles.itemName} numberOfLines={1}>
+              {item.name}
+            </Text>
+            <Text style={styles.itemDescription} numberOfLines={2}>
+              {item.description || 'Без описания'}
+            </Text>
+            
+            <View style={styles.itemMeta}>
+              {section && (
+                <View style={styles.itemMetaItem}>
+                  <Text style={styles.sectionEmoji}>{section.emoji}</Text>
+                  <Text style={styles.itemMetaText}>{section.name}</Text>
+                </View>
+              )}
+              <Text style={styles.itemMetaText}>№{item.serialNumber}</Text>
+            </View>
+          </View>
+          
+          <View style={styles.itemActions}>
+            <Text style={styles.itemPrice}>
+              {item.price > 0 ? `${item.price.toLocaleString()}₽` : 'Бесплатно'}
+            </Text>
+            {item.quantity > 1 && (
+              <Text style={styles.itemQuantity}>
+                Кол-во: {item.quantity}
+              </Text>
+            )}
+            {item.isOnLoan && (
+              <View style={styles.loanBadge}>
+                <IconSymbol name="arrow.up.right.square.fill" size={10} color={colors.warning} />
+                <Text style={styles.loanBadgeText}>На выдаче</Text>
+              </View>
+            )}
+          </View>
         </View>
+        
+        {item.tags.length > 0 && (
+          <View style={styles.itemTags}>
+            {item.tags.slice(0, 3).map((tag, index) => (
+              <View key={index} style={styles.itemTag}>
+                <Text style={styles.itemTagText}>{tag}</Text>
+              </View>
+            ))}
+            {item.tags.length > 3 && (
+              <Text style={styles.itemTagsMore}>+{item.tags.length - 3}</Text>
+            )}
+          </View>
+        )}
       </Pressable>
     );
   };
@@ -171,7 +240,7 @@ export default function SearchScreen() {
     <View style={commonStyles.container}>
       <View style={{ paddingHorizontal: 16, paddingTop: 16 }}>
         <TextInput
-          style={commonStyles.searchBar}
+          style={[commonStyles.input, { marginBottom: 0 }]}
           placeholder="Поиск предметов..."
           placeholderTextColor={colors.textSecondary}
           value={searchQuery}
@@ -214,6 +283,155 @@ export default function SearchScreen() {
           </Text>
         </View>
       )}
+
+      {/* Context Menu */}
+      <ContextMenu
+        visible={showContextMenu}
+        onClose={() => setShowContextMenu(false)}
+        options={{
+          title: selectedItem?.name,
+          actions: [
+            {
+              id: 'view',
+              title: 'Просмотреть',
+              icon: 'eye.fill',
+              color: colors.primary,
+            },
+            {
+              id: 'edit',
+              title: 'Редактировать',
+              icon: 'pencil',
+              color: colors.info,
+            },
+            {
+              id: 'loan',
+              title: selectedItem?.isOnLoan ? 'Вернуть' : 'Выдать',
+              icon: selectedItem?.isOnLoan ? 'arrow.down.left.circle.fill' : 'arrow.up.right.circle.fill',
+              color: selectedItem?.isOnLoan ? colors.success : colors.warning,
+            },
+            {
+              id: 'delete',
+              title: 'Удалить',
+              icon: 'trash.fill',
+              destructive: true,
+            },
+          ]
+        }}
+        onAction={handleContextAction}
+      />
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  itemCard: {
+    backgroundColor: colors.card,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  itemHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  itemImage: {
+    width: 60,
+    height: 60,
+    borderRadius: 8,
+    marginRight: 12,
+  },
+  itemImagePlaceholder: {
+    backgroundColor: colors.backgroundSecondary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  itemInfo: {
+    flex: 1,
+    marginRight: 12,
+  },
+  itemName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: 4,
+  },
+  itemDescription: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    lineHeight: 18,
+    marginBottom: 8,
+  },
+  itemMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  itemMetaItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  sectionEmoji: {
+    fontSize: 12,
+    marginRight: 4,
+  },
+  itemMetaText: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    fontWeight: '500',
+  },
+  itemActions: {
+    alignItems: 'flex-end',
+  },
+  itemPrice: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.success,
+    marginBottom: 4,
+  },
+  itemQuantity: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginBottom: 4,
+  },
+  loanBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.warningLight,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  loanBadgeText: {
+    fontSize: 10,
+    color: colors.warning,
+    marginLeft: 2,
+    fontWeight: '600',
+  },
+  itemTags: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  itemTag: {
+    backgroundColor: colors.primaryLight,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginRight: 6,
+  },
+  itemTagText: {
+    fontSize: 12,
+    color: colors.primary,
+    fontWeight: '500',
+  },
+  itemTagsMore: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    fontStyle: 'italic',
+  },
+});
