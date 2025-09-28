@@ -32,15 +32,9 @@ export default function ItemDetailScreen() {
   const [showQuantitySelector, setShowQuantitySelector] = useState(false);
   const [showMoveMenu, setShowMoveMenu] = useState(false);
 
-  useFocusEffect(
-    useCallback(() => {
-      if (itemId) {
-        loadItemData();
-      }
-    }, [itemId])
-  );
-
-  const loadItemData = async () => {
+  const loadItemData = useCallback(async () => {
+    if (!itemId) return;
+    
     try {
       setLoading(true);
       const items = await storageService.getItems();
@@ -76,7 +70,13 @@ export default function ItemDetailScreen() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [itemId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadItemData();
+    }, [loadItemData])
+  );
 
   const handleDelete = () => {
     if (!item) return;

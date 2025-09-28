@@ -345,8 +345,8 @@ export interface Statistics {
   mostExpensiveItem: InventoryItem | null;
   oldestItem: InventoryItem | null;
   newestItem: InventoryItem | null;
-  topTags: Array<{ tag: string; count: number }>;
-  monthlyAdditions: Array<{ month: string; count: number }>;
+  topTags: { tag: string; count: number }[];
+  monthlyAdditions: { month: string; count: number }[];
   goalCompletionRate: number;
 }
 

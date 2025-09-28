@@ -18,7 +18,7 @@ export default function ItemHistoryScreen() {
   const [item, setItem] = useState<InventoryItem | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     if (!itemId) {
       Alert.alert('Ошибка', 'ID предмета не указан');
       router.back();
@@ -41,12 +41,12 @@ export default function ItemHistoryScreen() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [itemId]);
 
   useFocusEffect(
     useCallback(() => {
       loadData();
-    }, [itemId])
+    }, [loadData])
   );
 
   const formatEventTime = (date: Date) => {

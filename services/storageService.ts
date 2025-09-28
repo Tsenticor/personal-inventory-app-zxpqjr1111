@@ -1077,7 +1077,7 @@ class StorageService {
         .slice(0, 10);
       
       // Monthly additions
-      const monthlyAdditions: Array<{ month: string; count: number }> = [];
+      const monthlyAdditions: { month: string; count: number }[] = [];
       const monthCounts: Record<string, number> = {};
       
       items.forEach(item => {

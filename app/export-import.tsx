@@ -87,7 +87,7 @@ export default function ExportImportScreen() {
       const jsonString = JSON.stringify(exportData, null, 2);
       
       const fileName = `inventory_backup_${new Date().toISOString().split('T')[0]}.json`;
-      const fileUri = `${FileSystem.documentDirectory}${fileName}`;
+      const fileUri = `${FileSystem.cacheDirectory}${fileName}`;
       
       await FileSystem.writeAsStringAsync(fileUri, jsonString);
       
@@ -127,7 +127,7 @@ export default function ExportImportScreen() {
       
       const jsonString = JSON.stringify(exportData, null, 2);
       const fileName = `inventory_items_${new Date().toISOString().split('T')[0]}.json`;
-      const fileUri = `${FileSystem.documentDirectory}${fileName}`;
+      const fileUri = `${FileSystem.cacheDirectory}${fileName}`;
       
       await FileSystem.writeAsStringAsync(fileUri, jsonString);
       
