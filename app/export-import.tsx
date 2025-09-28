@@ -13,7 +13,7 @@ import { Stack, router, useFocusEffect } from 'expo-router';
 import { IconSymbol } from '@/components/IconSymbol';
 import { commonStyles, colors } from '@/styles/commonStyles';
 import { storageService } from '@/services/storageService';
-import { ExportData, ImportResult, Statistics } from '@/types/inventory';
+import { ExportData, ImportResult, Statistics, Section } from '@/types/inventory';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
