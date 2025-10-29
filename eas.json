@@ -6,11 +6,21 @@
       "autoIncrement": true
     },
     "preview": {
+      "android": {
+        "buildType": "apk"
+      },
       "distribution": "internal",
       "autoIncrement": true
     },
     "production": {
+      "android": {
+        "buildType": "apk"
+      },
+      "distribution": "store",
       "autoIncrement": true
     }
+  },
+  "cli": {
+    "appVersionSource": "remote"
   }
 }

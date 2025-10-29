@@ -1,47 +1,68 @@
 {
   "expo": {
-    "name": "Natively",
-    "slug": "Natively",
-    "version": "1.0.0",
+    "name": "Inventory",
+    "slug": "inventory",
+    "version": "1.0.1",
     "orientation": "portrait",
-    "icon": "./assets/images/natively-dark.png",
+    "icon": "./assets/images/inventory-icon.png",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/images/natively-dark.png",
+      "image": "./assets/images/splash_inventory-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#000000"
+      "backgroundColor": "#0a0a0a"
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.Natively",
+      "bundleIdentifier": "com.anonymous.inventory",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSPhotoLibraryUsageDescription": "Для выбора фото предметов из галереи",
+        "NSCameraUsageDescription": "Для фотографирования предметов с помощью камеры",
+        "NSPhotoLibraryAddUsageDescription": "Для сохранения фото предметов в галерею"
       }
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/natively-dark.png",
-        "backgroundColor": "#000000"
+        "foregroundImage": "./assets/images/inventory-icon.png",
+        "backgroundColor": "#0a0a0a"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.anonymous.Natively"
+      "package": "com.anonymous.inventory",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_MEDIA_IMAGES"
+      ],
+      "blockedPermissions": []
     },
     "web": {
-      "favicon": "./assets/images/final_quest_240x240.png",
+      "favicon": "./assets/images/inventory-icon.png",
       "bundler": "metro"
     },
     "plugins": [
       "expo-font",
       "expo-router",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Разрешите доступ к галерее для выбора фото предметов",
+          "cameraPermission": "Разрешите доступ к камере для съемки фото предметов"
+        }
+      ]
     ],
-    "scheme": "natively",
+    "scheme": "inventory",
     "experiments": {
       "typedRoutes": true
     },
     "extra": {
-      "router": {}
-    }
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "f2958680-909f-428a-b06e-b6879704b6e4"
+      }
+    },
+    "owner": ""
   }
 }
